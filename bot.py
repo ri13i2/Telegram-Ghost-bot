@@ -1,4 +1,6 @@
+# bot.py
 import os
+from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -7,32 +9,58 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# 로컬 .env에서 환경변수 읽기 (Railway 등 서버에선 Variables 사용)
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# ─────────────────────────────────────────────────────────
+# ENV 로드
+# ─────────────────────────────────────────────────────────
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
+BOT_TOKEN = (
+    os.getenv("BOT_TOKEN")
+    or os.getenv("TOKEN")
+    or os.getenv("TELEGRAM_TOKEN")
+)
 
+print("[env] BOT_TOKEN set?:", bool(BOT_TOKEN))
+
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다 (Railway Service → Variables에 BOT_TOKEN 추가 후 재배포).")
+
+# ─────────────────────────────────────────────────────────
+# 상수/문구
+# ─────────────────────────────────────────────────────────
 WELCOME_TEXT = (
 "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
 "▫️[텔레그램 유령 자판기]에 오신 것을 환영합니다!\n"
-"▫️텔레그램 가라인원 구매 24h OK\n"
+"▫️텔레그램 유령인원 구매 24h OK\n"
 "▫️하단 메뉴 또는 /start 로 지금 시작하세요!\n"
 "▫️가격은 유동적이며, 대량 구매는 판매자에게!\n"
 "▫️숙지사항 꼭 확인하세요!\n"
 "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
-PER_100_PRICE = Decimal("7.21")  # 100명당 가격(총액 표시에만 사용)
+PER_100_PRICE = Decimal("7.21")  # 100명당 가격
 
+# ─────────────────────────────────────────────────────────
+# 키보드
+# ─────────────────────────────────────────────────────────
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
-        [InlineKeyboardButton("텔프 유령인원", callback_data="menu:telf_ghost")],
-        [InlineKeyboardButton("조회수", callback_data="menu:views")],
-        [InlineKeyboardButton("게시글 반응", callback_data="menu:reactions")],
-        [InlineKeyboardButton("숙지사항 및 사용법", callback_data="menu:notice")],
-        [InlineKeyboardButton("판매자 문의하기", url="https://t.me/YourSellerID")]  # 실제 링크로 교체
+        [
+            InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
+            InlineKeyboardButton("텔프유령인원", callback_data="menu:telf_ghost"),
+        ],
+        [
+            InlineKeyboardButton("조회수", callback_data="menu:views"),
+            InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
+        ],
+        [
+            InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
+            InlineKeyboardButton("문의하기", url="https://t.me/YourSellerID"),
+        ],
     ])
 
+# ─────────────────────────────────────────────────────────
+# 핸들러들
+# ─────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME_TEXT, reply_markup=main_menu_kb())
 
@@ -64,13 +92,21 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif q.data == "back:main":
-        await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+        try:
+            # 기존 메시지 삭제
+            await q.delete_message()
+        except Exception:
+            pass
+        # 새 메시지 전송
+        await q.message.chat.send_message(
+            WELCOME_TEXT,
+            reply_markup=main_menu_kb()
+        )
 
     else:
         await q.answer("준비 중입니다.", show_alert=True)
 
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 유령인원 수량 입력 처리(100 단위만 허용)
     if not context.user_data.get("awaiting_ghost_qty"):
         return
 
@@ -122,9 +158,10 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     )
 
+# ─────────────────────────────────────────────────────────
+# 앱 구동
+# ─────────────────────────────────────────────────────────
 def main():
-    if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN not set")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main)$"))
