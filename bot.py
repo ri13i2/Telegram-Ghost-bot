@@ -206,21 +206,27 @@ async def check_tron_payments(app):
             async with aiohttp.ClientSession() as session:
                 # 🔹 TRX 확인
                 async with session.get(trx_url) as resp:
+                    print("[TRX] API 응답 코드:", resp.status)
+                    data = await resp.json()
+                    print("[TRX] 원본 데이터:", data)
                     if resp.status == 200:
-                        data = await resp.json()
                         for tx in data.get("data", []):
                             amount = float(tx.get("amount", 0)) / 1_000_000
+                            print(f"[TRX] 감지된 트랜잭션: {amount}")
                             await handle_payment("TRX", amount, tx, app)
 
                 # 🔹 USDT 확인 (TRC20)
                 async with session.get(usdt_url) as resp:
+                    print("[USDT] API 응답 코드:", resp.status)
+                    data = await resp.json()
+                    print("[USDT] 원본 데이터:", data)
                     if resp.status == 200:
-                        data = await resp.json()
                         for tx in data.get("data", []):
                             if tx.get("tokenInfo", {}).get("symbol") == "USDT":
                                 decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
                                 raw_amount = int(tx.get("amount_str", 0))
                                 amount = raw_amount / (10 ** decimals)
+                                print(f"[USDT] 감지된 트랜잭션: {amount}")
                                 await handle_payment("USDT", amount, tx, app)
 
         except Exception as e:
@@ -271,7 +277,6 @@ async def handle_payment(method, amount, tx, app):
             # 주문 제거
             del pending_orders[user_id]
             break
-
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
