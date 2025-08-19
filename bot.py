@@ -10,6 +10,7 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, filters
 )
+from datetime import datetime
 
 # ─────────────────────────────────────────────
 # ENV 로드
@@ -20,6 +21,7 @@ BOT_TOKEN = (
     or os.getenv("TOKEN")
     or os.getenv("TELEGRAM_TOKEN")
 )
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # 관리자 알람용 개인 ID
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다.")
@@ -185,7 +187,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직
+# Tron 결제 확인 로직 (관리자 알람 포함)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -204,16 +206,31 @@ async def check_tron_payments(app):
                                     amount = tx.get("amount", 0) / 1e6
                                     if abs(amount - expected_amount) < 0.01:  # 금액 매칭
                                         chat_id = order["chat_id"]
-                                        # 1단계: 결제 확인 메시지
+                                        # 고객 알림
                                         await app.bot.send_message(
                                             chat_id=chat_id,
                                             text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
                                         )
-                                        # 2단계: 주소 입력 요청 메시지
                                         await app.bot.send_message(
                                             chat_id=chat_id,
                                             text="🎁 유령을 받을 주소를 신중히 입력하세요!"
                                         )
+                                        # 관리자 알림
+                                        if ADMIN_CHAT_ID:
+                                            try:
+                                                await app.bot.send_message(
+                                                    chat_id=int(ADMIN_CHAT_ID),
+                                                    text=(
+                                                        f"✅ [결제 완료 알림]\n"
+                                                        f"👤 사용자 ID: {user_id}\n"
+                                                        f"💰 금액: {amount} USDT\n"
+                                                        f"👥 수량: {order['qty']:,}명\n"
+                                                        f"🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                                                    )
+                                                )
+                                            except Exception as e:
+                                                print("관리자 알림 전송 실패:", e)
+
                                         del pending_orders[user_id]
                                         break
         except Exception as e:
