@@ -236,25 +236,15 @@ async def check_tron_payments(app):
 # 결제 감지 시 처리 로직
 # ─────────────────────────────────────────────
 async def handle_payment(method, amount, tx, app):
-    txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
-    if not txid:
-        txid = "N/A"
-
     for user_id, order in list(pending_orders.items()):
-        expected_amount = Decimal(str(order["amount"]))
-        if abs(amount - expected_amount) < Decimal("0.05"):  # 오차 ±0.05 허용
+        expected_amount = float(order["amount"])  # Decimal → float 변환
+        if abs(float(amount) - expected_amount) < 0.1:  # 둘 다 float
             chat_id = order["chat_id"]
 
             # 고객 알림
             await app.bot.send_message(
                 chat_id=chat_id,
-                text=(
-                    f"⭕️ 결제가 확인되었습니다!\n"
-                    f"- 금액: {amount} {method}\n"
-                    f"- 주문 수량: {order['qty']:,}명\n"
-                    f"- TxID: `{txid}`"
-                ),
-                parse_mode="Markdown"
+                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} {method}\n- 주문 수량: {order['qty']:,}명"
             )
             await app.bot.send_message(
                 chat_id=chat_id,
@@ -270,7 +260,7 @@ async def handle_payment(method, amount, tx, app):
                         f"👤 사용자 ID: {user_id}\n"
                         f"💰 금액: {amount} {method}\n"
                         f"👥 수량: {order['qty']:,}명\n"
-                        f"🔗 TxID: {txid}"
+                        f"🔗 TxID: {tx.get('transaction_id') or tx.get('hash')}"
                     )
                 )
 
