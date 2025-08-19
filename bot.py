@@ -164,7 +164,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직
+# Tron 결제 확인 로직 (수정본)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -180,12 +180,23 @@ async def check_tron_payments(app):
                             expected_amount = float(order["amount"])
                             for tx in txs:
                                 if tx.get("contractType") == 1:  # TransferContract
-                                    amount = tx.get("amount", 0) / 1e6
-                                    if abs(amount - expected_amount) < 0.01:  # 금액 매칭
+                                    # ───── amount 안전 변환 ─────
+                                    amount_raw = tx.get("amount", 0)
+                                    try:
+                                        amount = float(amount_raw) / 1e6
+                                    except (ValueError, TypeError):
+                                        amount = 0.0
+
+                                    # 금액 매칭 확인
+                                    if abs(amount - expected_amount) < 0.01:
                                         chat_id = order["chat_id"]
                                         await app.bot.send_message(
                                             chat_id=chat_id,
-                                            text=f"✅ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
+                                            text=(
+                                                f"✅ 결제가 확인되었습니다!\n"
+                                                f"- 금액: {amount} USDT\n"
+                                                f"- 주문 수량: {order['qty']:,}명"
+                                            )
                                         )
                                         del pending_orders[user_id]
                                         break
