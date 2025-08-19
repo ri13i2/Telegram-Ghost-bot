@@ -74,7 +74,7 @@ def main_menu_kb():
         ],
         [
             InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
-            InlineKeyboardButton("문의하기", url="https://t.me/YourSellerID"),
+            InlineKeyboardButton("문의하기", url="https://t.me/ghostsalesbot1"),
         ],
     ])
 
