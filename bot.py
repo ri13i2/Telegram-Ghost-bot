@@ -206,31 +206,30 @@ async def check_tron_payments(app):
                 async with session.get(trx_url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        print("🔍 TRX 응답:", data)   # 👉 추가
                         for tx in data.get("data", []):
-                            if tx.get("contractRet") != "SUCCESS":
-                                continue
-                            raw_amount = tx.get("amount", 0)
-                            amount = Decimal(str(raw_amount)) / Decimal("1000000")  # 6자리 소수 변환
+                            amount = float(tx.get("amount", 0)) / 1_000_000
+                            print(f"💰 TRX 트랜잭션 감지: {amount} TRX")  # 👉 추가
                             await handle_payment("TRX", amount, tx, app)
 
                 # 🔹 USDT 확인 (TRC20)
                 async with session.get(usdt_url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
+                        print("🔍 USDT 응답:", data)   # 👉 추가
                         for tx in data.get("data", []):
-                            if tx.get("tokenInfo", {}).get("symbol") != "USDT":
-                                continue
-                            if tx.get("finalResult") != "SUCCESS":
-                                continue
-                            decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
-                            raw_amount = Decimal(tx.get("amount_str", "0"))
-                            amount = raw_amount / (10 ** decimals)
-                            await handle_payment("USDT", amount, tx, app)
+                            if tx.get("tokenInfo", {}).get("symbol") == "USDT":
+                                decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
+                                raw_amount = int(tx.get("amount_str", 0))
+                                amount = raw_amount / (10 ** decimals)
+                                print(f"💵 USDT 트랜잭션 감지: {amount} USDT")  # 👉 추가
+                                await handle_payment("USDT", amount, tx, app)
 
         except Exception as e:
             print("❌ 결제 확인 에러:", e)
 
-        await asyncio.sleep(15)  # 15초마다 체크
+        await asyncio.sleep(30)
+
 
 
 # ─────────────────────────────────────────────
