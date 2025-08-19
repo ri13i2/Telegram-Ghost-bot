@@ -229,18 +229,25 @@ async def check_tron_payments(app):
         await asyncio.sleep(30)
 
 # ─────────────────────────────────────────────
-# 결제 감지 시 처리 로직
+# 결제 감지 시 처리 로직 (Decimal 안전 처리)
 # ─────────────────────────────────────────────
 async def handle_payment(method, amount, tx, app):
     for user_id, order in list(pending_orders.items()):
-        expected_amount = float(order["amount"])
-        if abs(float(amount) - expected_amount) < 0.1 and order["method"] == method:
+        expected_amount = order["amount"]  # 이미 Decimal
+        received_amount = Decimal(str(amount))  # float → Decimal 변환
+
+        # 오차 허용 (±0.1 단위)
+        if abs(received_amount - expected_amount) <= Decimal("0.1") and order["method"] == method:
             chat_id = order["chat_id"]
 
             # 고객 알림
             await app.bot.send_message(
                 chat_id=chat_id,
-                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} {method}\n- 주문 수량: {order['qty']:,}명"
+                text=(
+                    f"⭕️ 결제가 확인되었습니다!\n"
+                    f"- 금액: {received_amount} {method}\n"
+                    f"- 주문 수량: {order['qty']:,}명"
+                )
             )
             await app.bot.send_message(
                 chat_id=chat_id,
@@ -249,19 +256,22 @@ async def handle_payment(method, amount, tx, app):
 
             # 관리자 알림
             if ADMIN_CHAT_ID:
+                txid = tx.get("transaction_id") or tx.get("hash")
                 await app.bot.send_message(
                     chat_id=int(ADMIN_CHAT_ID),
                     text=(
                         f"✅ [결제 완료 알림]\n"
                         f"👤 사용자 ID: {user_id}\n"
-                        f"💰 금액: {amount} {method}\n"
+                        f"💰 금액: {received_amount} {method}\n"
                         f"👥 수량: {order['qty']:,}명\n"
-                        f"🔗 TxID: {tx.get('transaction_id') or tx.get('hash')}"
+                        f"🔗 TxID: {txid}"
                     )
                 )
 
+            # 주문 제거
             del pending_orders[user_id]
             break
+
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
