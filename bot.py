@@ -147,9 +147,6 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_ghost_qty"] = False
     context.user_data["ghost_qty"] = qty
 
-    # 수량 저장 (결제수단 선택 후 금액 계산)
-    context.user_data["ghost_qty"] = qty
-
     await update.message.reply_text(
         f"💫 {qty:,}명을 선택하셨습니다!\n\n"
         "💳 결제 수단을 선택하세요.",
