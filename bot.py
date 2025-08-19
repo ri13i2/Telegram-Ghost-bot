@@ -55,7 +55,12 @@ NOTICE_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
-PER_100_PRICE = Decimal("7.21")  # 100명당 가격
+# ✅ 단가 (100명 기준)
+PRICE_PER_100 = {
+    "USDT": Decimal("7.21"),     # 100명당 7.21 USDT
+    "TRX": Decimal("20.56"),     # 100명당 20.56 TRX
+}
+
 PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
 
 # 결제 대기 주문 저장소
@@ -93,9 +98,9 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "menu:ghost":
         kb = [
-            [InlineKeyboardButton("100명 - 7.21$", callback_data="ghost:100")],
-            [InlineKeyboardButton("500명 - 36.06$", callback_data="ghost:500")],
-            [InlineKeyboardButton("1,000명 - 72.11$", callback_data="ghost:1000")],
+            [InlineKeyboardButton("100명", callback_data="ghost:100")],
+            [InlineKeyboardButton("500명", callback_data="ghost:500")],
+            [InlineKeyboardButton("1,000명", callback_data="ghost:1000")],
             [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
         ]
         await q.edit_message_text("🔴 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
@@ -142,14 +147,11 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_ghost_qty"] = False
     context.user_data["ghost_qty"] = qty
 
-    blocks = qty // 100
-    total = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    context.user_data["ghost_amount"] = total
+    # 수량 저장 (결제수단 선택 후 금액 계산)
     context.user_data["ghost_qty"] = qty
 
     await update.message.reply_text(
-        f"💵 예상 결제금액: {total} USD (100명당 {PER_100_PRICE} USD 기준)\n\n"
+        f"💫 {qty:,}명을 선택하셨습니다!\n\n"
         "💳 결제 수단을 선택하세요.",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("TRON (TRX)", callback_data="pay:TRX")],
@@ -164,20 +166,20 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     method = q.data.split(":")[1]  # TRX 또는 USDT
 
     qty = context.user_data.get("ghost_qty")
-    amount = context.user_data.get("ghost_amount")
-    chat_id = q.message.chat_id
-    user_id = q.from_user.id
-
-    if not qty or not amount:
+    if not qty:
         await q.answer("먼저 수량을 선택해주세요.", show_alert=True)
         return
 
-    pending_orders[user_id] = {
-    "qty": qty,
-    "amount": amount,
-    "chat_id": chat_id,
-    "method": method  # USDT or TRX
-}
+    blocks = qty // 100
+    per_unit_price = PRICE_PER_100[method]
+    amount = (per_unit_price * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    pending_orders[q.from_user.id] = {
+        "qty": qty,
+        "amount": amount,
+        "chat_id": q.message.chat_id,
+        "method": method
+    }
 
     await q.edit_message_text(
         f"🧾 주문 요약\n"
@@ -206,23 +208,19 @@ async def check_tron_payments(app):
                 async with session.get(trx_url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        print("🔍 TRX 응답:", data)   # 👉 추가
                         for tx in data.get("data", []):
                             amount = float(tx.get("amount", 0)) / 1_000_000
-                            print(f"💰 TRX 트랜잭션 감지: {amount} TRX")  # 👉 추가
                             await handle_payment("TRX", amount, tx, app)
 
                 # 🔹 USDT 확인 (TRC20)
                 async with session.get(usdt_url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        print("🔍 USDT 응답:", data)   # 👉 추가
                         for tx in data.get("data", []):
                             if tx.get("tokenInfo", {}).get("symbol") == "USDT":
                                 decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
                                 raw_amount = int(tx.get("amount_str", 0))
                                 amount = raw_amount / (10 ** decimals)
-                                print(f"💵 USDT 트랜잭션 감지: {amount} USDT")  # 👉 추가
                                 await handle_payment("USDT", amount, tx, app)
 
         except Exception as e:
@@ -230,15 +228,13 @@ async def check_tron_payments(app):
 
         await asyncio.sleep(30)
 
-
-
 # ─────────────────────────────────────────────
 # 결제 감지 시 처리 로직
 # ─────────────────────────────────────────────
 async def handle_payment(method, amount, tx, app):
     for user_id, order in list(pending_orders.items()):
-        expected_amount = float(order["amount"])  # Decimal → float 변환
-        if abs(float(amount) - expected_amount) < 0.1:  # 둘 다 float
+        expected_amount = float(order["amount"])
+        if abs(float(amount) - expected_amount) < 0.1 and order["method"] == method:
             chat_id = order["chat_id"]
 
             # 고객 알림
@@ -266,7 +262,6 @@ async def handle_payment(method, amount, tx, app):
 
             del pending_orders[user_id]
             break
-
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
