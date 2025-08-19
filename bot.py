@@ -192,22 +192,24 @@ async def check_tron_payments(app):
         except Exception as e:
             print("결제 확인 에러:", e)
 
-        await asyncio.sleep(30)  # 30초마다 확인
+        await asyncio.sleep(30)
 
 # ─────────────────────────────────────────────
-# 앱 구동
+# 앱 구동 (Railway friendly)
 # ─────────────────────────────────────────────
+async def on_startup(app):
+    # 이벤트 루프 시작 후 실행
+    asyncio.create_task(check_tron_payments(app))
+    print("🔄 Tron 결제 확인 태스크 시작됨")
+
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main)$"))
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRX|USDT)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
-    # 🔥 여기서 변경됨: 루프 직접 접근 대신 app.create_task 사용
-    app.create_task(check_tron_payments(app))
-
-    print("✅ 유령 자판기 실행 중... (polling)")
+    print("✅ 유령 자판기 실행 중... (Railway)")
     app.run_polling()
 
 if __name__ == "__main__":
