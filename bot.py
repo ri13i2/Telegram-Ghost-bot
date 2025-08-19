@@ -173,11 +173,11 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     pending_orders[user_id] = {
-        "qty": qty,
-        "amount": amount,
-        "chat_id": chat_id,
-        "method": method
-    }
+    "qty": qty,
+    "amount": amount,
+    "chat_id": chat_id,
+    "method": method  # USDT or TRX
+}
 
     await q.edit_message_text(
         f"🧾 주문 요약\n"
@@ -207,7 +207,10 @@ async def check_tron_payments(app):
                     if resp.status == 200:
                         data = await resp.json()
                         for tx in data.get("data", []):
-                            amount = float(tx.get("amount", 0)) / 1_000_000  # TRX 단위 변환
+                            if tx.get("contractRet") != "SUCCESS":
+                                continue
+                            raw_amount = tx.get("amount", 0)
+                            amount = Decimal(str(raw_amount)) / Decimal("1000000")  # 6자리 소수 변환
                             await handle_payment("TRX", amount, tx, app)
 
                 # 🔹 USDT 확인 (TRC20)
@@ -215,31 +218,44 @@ async def check_tron_payments(app):
                     if resp.status == 200:
                         data = await resp.json()
                         for tx in data.get("data", []):
-                            if tx.get("tokenInfo", {}).get("symbol") == "USDT":
-                                decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
-                                raw_amount = int(tx.get("amount_str", 0))
-                                amount = raw_amount / (10 ** decimals)
-                                await handle_payment("USDT", amount, tx, app)
+                            if tx.get("tokenInfo", {}).get("symbol") != "USDT":
+                                continue
+                            if tx.get("finalResult") != "SUCCESS":
+                                continue
+                            decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
+                            raw_amount = Decimal(tx.get("amount_str", "0"))
+                            amount = raw_amount / (10 ** decimals)
+                            await handle_payment("USDT", amount, tx, app)
 
         except Exception as e:
-            print("결제 확인 에러:", e)
+            print("❌ 결제 확인 에러:", e)
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(15)  # 15초마다 체크
 
 
 # ─────────────────────────────────────────────
 # 결제 감지 시 처리 로직
 # ─────────────────────────────────────────────
 async def handle_payment(method, amount, tx, app):
+    txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
+    if not txid:
+        txid = "N/A"
+
     for user_id, order in list(pending_orders.items()):
-        expected_amount = float(order["amount"])
-        if abs(amount - expected_amount) < 0.1:
+        expected_amount = Decimal(str(order["amount"]))
+        if abs(amount - expected_amount) < Decimal("0.05"):  # 오차 ±0.05 허용
             chat_id = order["chat_id"]
 
             # 고객 알림
             await app.bot.send_message(
                 chat_id=chat_id,
-                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} {method}\n- 주문 수량: {order['qty']:,}명"
+                text=(
+                    f"⭕️ 결제가 확인되었습니다!\n"
+                    f"- 금액: {amount} {method}\n"
+                    f"- 주문 수량: {order['qty']:,}명\n"
+                    f"- TxID: `{txid}`"
+                ),
+                parse_mode="Markdown"
             )
             await app.bot.send_message(
                 chat_id=chat_id,
@@ -255,12 +271,13 @@ async def handle_payment(method, amount, tx, app):
                         f"👤 사용자 ID: {user_id}\n"
                         f"💰 금액: {amount} {method}\n"
                         f"👥 수량: {order['qty']:,}명\n"
-                        f"🔗 TxID: {tx.get('transaction_id') or tx.get('hash')}"
+                        f"🔗 TxID: {txid}"
                     )
                 )
 
             del pending_orders[user_id]
             break
+
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
