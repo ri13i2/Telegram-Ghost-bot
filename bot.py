@@ -9,17 +9,12 @@ from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, filters
 )
-from datetime import datetime
 
 # ─────────────────────────────────────────────
 # ENV 로드
 # ─────────────────────────────────────────────
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
-BOT_TOKEN = (
-    os.getenv("BOT_TOKEN")
-    or os.getenv("TOKEN")
-    or os.getenv("TELEGRAM_TOKEN")
-)
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TOKEN") or os.getenv("TELEGRAM_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # 관리자 알람용 개인 ID
 
 if not BOT_TOKEN:
@@ -29,29 +24,19 @@ if not BOT_TOKEN:
 # 상수
 # ─────────────────────────────────────────────
 WELCOME_TEXT = (
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
     "▫️[텔레그램 유령 자판기]에 오신 것을 환영합니다!\n"
     "▫️텔레그램 유령인원 구매 24h OK\n"
     "▫️하단 메뉴 또는 /start 로 지금 시작하세요!\n"
-    "▫️가격은 유동적이며, 대량 구매는 판매자에게!\n"
-    "▫️숙지사항 꼭 확인하세요!\n"
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖"
+    "▫️가격은 유동적이며, 대량 구매는 판매자에게!"
 )
 
 NOTICE_TEXT = (
     " 유령 자판기 이용법 🚩\n"
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
-    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n\n"
-    "• 유령 인입 과정이 완료되기까지 그룹/채널 설정 금지\n"
-    "• 작업 완료 시간은 약 10~20분 소요\n"
-    "• 1개의 주소만 진행 가능합니다.\n"
-    "• 결제창 제한시간은 15분이며, 경과 시 처음부터 다시 결제 필요\n\n"
-    "• 자판기 이용법을 위반하여 발생하는 불상사는 책임지지 않습니다.\n\n"
-    "자판기 운영 취지:\n"
-    "① 잦은 계정 터짐 방지\n"
-    "② 본인 계정 노출 방지 (안전)\n"
-    "봇/대량 구매시 문의 바랍니다.\n"
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖"
+    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n"
+    "• 유령 인입 과정 중 그룹/채널 설정 금지\n"
+    "• 완료까지 약 10~20분 소요\n"
+    "• 결제창 제한시간은 15분\n"
+    "• 자판기 규칙 위반 시 책임지지 않습니다."
 )
 
 # ✅ 단가 (100명 기준)
@@ -63,7 +48,6 @@ PRICE_PER_100 = {
 PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
 
 # 결제 대기 주문 저장소
-# {user_id: {"qty": int, "amount": Decimal, "chat_id": int, "method": "TRX"/"USDT"}}
 pending_orders = {}
 
 # ─────────────────────────────────────────────
@@ -71,18 +55,8 @@ pending_orders = {}
 # ─────────────────────────────────────────────
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
-            InlineKeyboardButton("텔프유령인원", callback_data="menu:telf_ghost"),
-        ],
-        [
-            InlineKeyboardButton("조회수", callback_data="menu:views"),
-            InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
-        ],
-        [
-            InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
-            InlineKeyboardButton("문의하기", url="https://t.me/ghostsalesbot1"),
-        ],
+        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
+        [InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice")],
     ])
 
 # ─────────────────────────────────────────────
@@ -126,9 +100,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif q.data == "back:main":
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
 
-    else:
-        await q.answer("준비 중입니다.", show_alert=True)
-
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_ghost_qty"):
         return
@@ -159,7 +130,7 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    method = q.data.split(":")[1]  # TRX 또는 USDT
+    method = q.data.split(":")[1]
 
     qty = context.user_data.get("ghost_qty")
     if not qty:
@@ -193,93 +164,84 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 # Tron 결제 확인 로직
 # ─────────────────────────────────────────────
-async def check_tron_payments(app):
+async def check_tron_payments(context: ContextTypes.DEFAULT_TYPE):
+    app = context.application
     trx_url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
     usdt_url = f"https://apilist.tronscanapi.com/api/transfer/trc20?limit=20&start=0&sort=-timestamp&count=true&address={PAYMENT_ADDRESS}"
 
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                # 🔹 TRX 확인
-                async with session.get(trx_url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for tx in data.get("data", []):
-                            amount = float(tx.get("amount", 0)) / 1_000_000
+    try:
+        async with aiohttp.ClientSession() as session:
+            # 🔹 TRX 확인
+            async with session.get(trx_url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for tx in data.get("data", []):
+                        to_addr = tx.get("toAddress")
+                        if to_addr and to_addr == PAYMENT_ADDRESS:
+                            amount = Decimal(str(tx.get("amount", 0))) / Decimal("1000000")
                             await handle_payment("TRX", amount, tx, app)
 
-                # 🔹 USDT 확인
-                async with session.get(usdt_url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        for tx in data.get("data", []):
+            # 🔹 USDT 확인
+            async with session.get(usdt_url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for tx in data.get("data", []):
+                        if tx.get("to_address") == PAYMENT_ADDRESS:
                             if tx.get("tokenInfo", {}).get("symbol") == "USDT":
                                 decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
                                 raw_amount = int(tx.get("amount_str", 0))
-                                amount = raw_amount / (10 ** decimals)
+                                amount = Decimal(raw_amount) / (10 ** decimals)
                                 await handle_payment("USDT", amount, tx, app)
 
-        except Exception as e:
-            print("❌ 결제 확인 에러:", e)
-
-        await asyncio.sleep(30)
+    except Exception as e:
+        print("❌ 결제 확인 에러:", e)
 
 # ─────────────────────────────────────────────
 # 결제 감지 시 처리 로직
 # ─────────────────────────────────────────────
 async def handle_payment(method, amount, tx, app):
     for user_id, order in list(pending_orders.items()):
-        expected_amount = order["amount"]  # Decimal
-        received_amount = Decimal(str(amount))  # float → Decimal 변환
-
-        # 오차 허용 (±0.1)
-        if abs(received_amount - expected_amount) <= Decimal("0.1") and order["method"] == method:
+        expected_amount = order["amount"]
+        if abs(amount - expected_amount) <= Decimal("0.1") and order["method"] == method:
             chat_id = order["chat_id"]
 
-            # 고객 알림
             await app.bot.send_message(
                 chat_id=chat_id,
                 text=(
                     f"⭕️ 결제가 확인되었습니다!\n"
-                    f"- 금액: {received_amount} {method}\n"
+                    f"- 금액: {amount} {method}\n"
                     f"- 주문 수량: {order['qty']:,}명"
                 )
             )
-            await app.bot.send_message(
-                chat_id=chat_id,
-                text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-            )
+            await app.bot.send_message(chat_id=chat_id, text="🎁 유령을 받을 주소를 신중히 입력하세요!")
 
-            # 관리자 알림
             if ADMIN_CHAT_ID:
-                txid = tx.get("transaction_id") or tx.get("hash")
+                txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
                 await app.bot.send_message(
                     chat_id=int(ADMIN_CHAT_ID),
                     text=(
                         f"✅ [결제 완료 알림]\n"
                         f"👤 사용자 ID: {user_id}\n"
-                        f"💰 금액: {received_amount} {method}\n"
+                        f"💰 금액: {amount} {method}\n"
                         f"👥 수량: {order['qty']:,}명\n"
                         f"🔗 TxID: {txid}"
                     )
                 )
-
             del pending_orders[user_id]
             break
 
 # ─────────────────────────────────────────────
 # 앱 구동
 # ─────────────────────────────────────────────
-async def on_startup(app):
-    asyncio.create_task(check_tron_payments(app))
-    print("🔄 Tron 결제 확인 태스크 시작됨")
-
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main|menu:notice)$"))
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRX|USDT)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+
+    # ✅ 30초마다 반복 실행 (Railway 안정적)
+    app.job_queue.run_repeating(check_tron_payments, interval=30, first=10)
 
     print("✅ 유령 자판기 실행 중... (Railway)")
     app.run_polling()
