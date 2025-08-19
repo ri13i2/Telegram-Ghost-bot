@@ -192,7 +192,7 @@ async def check_tron_payments(app):
         except Exception as e:
             print("결제 확인 에러:", e)
 
-        await asyncio.sleep(30)  # 20초마다 확인
+        await asyncio.sleep(30)  # 30초마다 확인
 
 # ─────────────────────────────────────────────
 # 앱 구동
@@ -204,8 +204,8 @@ def main():
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRX|USDT)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
-    # Tron 결제 감시 태스크 시작
-    asyncio.get_running_loop().create_task(check_tron_payments(app))
+    # 🔥 여기서 변경됨: 루프 직접 접근 대신 app.create_task 사용
+    app.create_task(check_tron_payments(app))
 
     print("✅ 유령 자판기 실행 중... (polling)")
     app.run_polling()
