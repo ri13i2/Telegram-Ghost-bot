@@ -37,6 +37,21 @@ WELCOME_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
+NOTICE_TEXT = (
+    "유령 자판기 이용법 🚩\n"
+    "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n\n"
+    "• 유령 인입 과정이 완료되기까지 그룹/채널 설정 금지\n"
+    "• 작업 완료 시간은 약 10~20분 소요\n"
+    "• 결제창 제한시간은 15분이며, 경과 시 처음부터 다시 결제 필요\n\n"
+    "• 자판기 이용법을 위반하여 발생하는 불상사는 책임지지 않습니다.\n\n"
+    "자판기 운영 취지:\n"
+    "① 잦은 계정 터짐 방지\n"
+    "② 본인 계정 노출 방지 (안전)\n"
+    "대량 구매는 자제 부탁드리며, 필요 시 개별 문의 바랍니다.\n"
+    "➖➖➖➖➖➖➖➖➖➖➖➖➖"
+)
+
 PER_100_PRICE = Decimal("7.21")  # 100명당 가격
 PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
 
@@ -94,6 +109,11 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
             ])
         )
+
+    elif q.data == "menu:notice":
+        await q.edit_message_text(NOTICE_TEXT, reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
+        ]))
 
     elif q.data == "back:main":
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
@@ -164,7 +184,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직 (수정본)
+# Tron 결제 확인 로직
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -180,23 +200,12 @@ async def check_tron_payments(app):
                             expected_amount = float(order["amount"])
                             for tx in txs:
                                 if tx.get("contractType") == 1:  # TransferContract
-                                    # ───── amount 안전 변환 ─────
-                                    amount_raw = tx.get("amount", 0)
-                                    try:
-                                        amount = float(amount_raw) / 1e6
-                                    except (ValueError, TypeError):
-                                        amount = 0.0
-
-                                    # 금액 매칭 확인
-                                    if abs(amount - expected_amount) < 0.01:
+                                    amount = tx.get("amount", 0) / 1e6
+                                    if abs(amount - expected_amount) < 0.01:  # 금액 매칭
                                         chat_id = order["chat_id"]
                                         await app.bot.send_message(
                                             chat_id=chat_id,
-                                            text=(
-                                                f"✅ 결제가 확인되었습니다!\n"
-                                                f"- 금액: {amount} USDT\n"
-                                                f"- 주문 수량: {order['qty']:,}명"
-                                            )
+                                            text=f"✅ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
                                         )
                                         del pending_orders[user_id]
                                         break
@@ -209,14 +218,13 @@ async def check_tron_payments(app):
 # 앱 구동 (Railway friendly)
 # ─────────────────────────────────────────────
 async def on_startup(app):
-    # 이벤트 루프 시작 후 실행
     asyncio.create_task(check_tron_payments(app))
     print("🔄 Tron 결제 확인 태스크 시작됨")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main)$"))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main|menu:notice)$"))
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRX|USDT)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
