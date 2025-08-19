@@ -39,10 +39,9 @@ NOTICE_TEXT = (
     "• 자판기 규칙 위반 시 책임지지 않습니다."
 )
 
-# ✅ 단가 (100명 기준)
+# ✅ 단가 (100명 기준) → TRON 단일 결제
 PRICE_PER_100 = {
-    "USDT": Decimal("7.21"),     # 100명당 7.21 USDT
-    "TRX": Decimal("20.56"),     # 100명당 20.56 TRX
+    "TRON": Decimal("7.21"),     # 100명당 7.21 TRON
 }
 
 PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
@@ -121,8 +120,7 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💫 {qty:,}명을 선택하셨습니다!\n\n"
         "💳 결제 수단을 선택하세요.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("TRON (TRX)", callback_data="pay:TRX")],
-            [InlineKeyboardButton("Tether USDT (TRC20)", callback_data="pay:USDT")],
+            [InlineKeyboardButton("TRON (TRX)", callback_data="pay:TRON")],
             [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")]
         ])
     )
@@ -162,16 +160,14 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직
+# Tron 결제 확인 로직 (TRON 단일)
 # ─────────────────────────────────────────────
 async def check_tron_payments(context: ContextTypes.DEFAULT_TYPE):
     app = context.application
     trx_url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
-    usdt_url = f"https://apilist.tronscanapi.com/api/transfer/trc20?limit=20&start=0&sort=-timestamp&count=true&address={PAYMENT_ADDRESS}"
 
     try:
         async with aiohttp.ClientSession() as session:
-            # 🔹 TRX 확인
             async with session.get(trx_url) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -179,20 +175,7 @@ async def check_tron_payments(context: ContextTypes.DEFAULT_TYPE):
                         to_addr = tx.get("toAddress")
                         if to_addr and to_addr == PAYMENT_ADDRESS:
                             amount = Decimal(str(tx.get("amount", 0))) / Decimal("1000000")
-                            await handle_payment("TRX", amount, tx, app)
-
-            # 🔹 USDT 확인
-            async with session.get(usdt_url) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    for tx in data.get("data", []):
-                        if tx.get("to_address") == PAYMENT_ADDRESS:
-                            if tx.get("tokenInfo", {}).get("symbol") == "USDT":
-                                decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
-                                raw_amount = int(tx.get("amount_str", 0))
-                                amount = Decimal(raw_amount) / (10 ** decimals)
-                                await handle_payment("USDT", amount, tx, app)
-
+                            await handle_payment("TRON", amount, tx, app)
     except Exception as e:
         print("❌ 결제 확인 에러:", e)
 
@@ -237,13 +220,13 @@ def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main|menu:notice)$"))
-    app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRX|USDT)$"))
+    app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:(TRON)$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
-    # ✅ 30초마다 반복 실행 (Railway 안정적)
+    # ✅ 30초마다 반복 실행
     app.job_queue.run_repeating(check_tron_payments, interval=30, first=10)
 
-    print("✅ 유령 자판기 실행 중... (Railway)")
+    print("✅ 유령 자판기 실행 중... (Railway / TRON 단일 결제 모드)")
     app.run_polling()
 
 if __name__ == "__main__":
