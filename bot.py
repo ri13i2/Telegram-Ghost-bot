@@ -187,7 +187,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직 (관리자 알람 포함)
+# Tron 결제 확인 로직 (관리자 알람 포함, 금액 파싱 수정)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -203,9 +203,18 @@ async def check_tron_payments(app):
                             expected_amount = float(order["amount"])
                             for tx in txs:
                                 if tx.get("contractType") == 1:  # TransferContract
-                                    amount = tx.get("amount", 0) / 1e6
-                                    if abs(amount - expected_amount) < 0.01:  # 금액 매칭
+                                    raw_amount = tx.get("amount", 0)
+                                    try:
+                                        amount = float(raw_amount) / 1e6
+                                    except Exception as e:
+                                        print("금액 파싱 오류:", raw_amount, e)
+                                        continue
+
+                                    print("트랜잭션 확인:", amount, "USDT (예상:", expected_amount, ")")
+
+                                    if abs(amount - expected_amount) < 0.1:  # 0.1 오차 허용
                                         chat_id = order["chat_id"]
+
                                         # 고객 알림
                                         await app.bot.send_message(
                                             chat_id=chat_id,
@@ -215,6 +224,7 @@ async def check_tron_payments(app):
                                             chat_id=chat_id,
                                             text="🎁 유령을 받을 주소를 신중히 입력하세요!"
                                         )
+
                                         # 관리자 알림
                                         if ADMIN_CHAT_ID:
                                             try:
