@@ -193,90 +193,74 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직 (TRX + USDT-TRC20 지원)
+# Tron 결제 확인 로직 (TRX / USDT 동시 지원)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
-    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
+    trx_url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
+    usdt_url = f"https://apilist.tronscanapi.com/api/transfer/trc20?limit=20&start=0&sort=-timestamp&count=true&address={PAYMENT_ADDRESS}"
 
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
+                # 🔹 TRX 확인
+                async with session.get(trx_url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        txs = data.get("data", [])
+                        for tx in data.get("data", []):
+                            amount = float(tx.get("amount", 0)) / 1_000_000  # TRX 단위 변환
+                            await handle_payment("TRX", amount, tx, app)
 
-                        for user_id, order in list(pending_orders.items()):
-                            expected_amount = float(order["amount"])
-                            method = order.get("method")
-
-                            for tx in txs:
-                                raw_amount = tx.get("amount", 0)
-                                token_info = tx.get("tokenInfo", {})
-
-                                # ✅ TRX 결제 처리
-                                if method == "TRX":
-                                    if tx.get("contractType") == 1 and not token_info:
-                                        try:
-                                            amount = float(raw_amount) / 1e6
-                                        except:
-                                            continue
-                                        print(f"[TRX 결제 확인] {amount} TRX / 예상: {expected_amount}")
-                                        if abs(amount - expected_amount) < 0.1:
-                                            await handle_payment_success(app, user_id, order, amount, "TRX")
-
-                                # ✅ USDT-TRC20 결제 처리
-                                elif method == "USDT":
-                                    symbol = token_info.get("tokenAbbr") or token_info.get("symbol")
-                                    if symbol == "USDT":
-                                        decimals = int(token_info.get("tokenDecimal", 6))
-                                        try:
-                                            amount = float(raw_amount) / (10 ** decimals)
-                                        except:
-                                            continue
-                                        print(f"[USDT 결제 확인] {amount} USDT / 예상: {expected_amount}")
-                                        if abs(amount - expected_amount) < 0.1:
-                                            await handle_payment_success(app, user_id, order, amount, "USDT")
+                # 🔹 USDT 확인 (TRC20)
+                async with session.get(usdt_url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        for tx in data.get("data", []):
+                            if tx.get("tokenInfo", {}).get("symbol") == "USDT":
+                                decimals = int(tx["tokenInfo"].get("tokenDecimal", 6))
+                                raw_amount = int(tx.get("amount_str", 0))
+                                amount = raw_amount / (10 ** decimals)
+                                await handle_payment("USDT", amount, tx, app)
 
         except Exception as e:
             print("결제 확인 에러:", e)
 
         await asyncio.sleep(30)
 
-# ─────────────────────────────────────────────
-# 결제 성공 처리 (공통)
-# ─────────────────────────────────────────────
-async def handle_payment_success(app, user_id, order, amount, method):
-    chat_id = order["chat_id"]
 
-    # 고객 알림
-    await app.bot.send_message(
-        chat_id=chat_id,
-        text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} {method}\n- 주문 수량: {order['qty']:,}명"
-    )
-    await app.bot.send_message(
-        chat_id=chat_id,
-        text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-    )
+# ─────────────────────────────────────────────
+# 결제 감지 시 처리 로직
+# ─────────────────────────────────────────────
+async def handle_payment(method, amount, tx, app):
+    for user_id, order in list(pending_orders.items()):
+        expected_amount = float(order["amount"])
+        if abs(amount - expected_amount) < 0.1:
+            chat_id = order["chat_id"]
 
-    # 관리자 알림
-    if ADMIN_CHAT_ID:
-        try:
+            # 고객 알림
             await app.bot.send_message(
-                chat_id=int(ADMIN_CHAT_ID),
-                text=(
-                    f"✅ [결제 완료 알림]\n"
-                    f"👤 사용자 ID: {user_id}\n"
-                    f"💰 금액: {amount} {method}\n"
-                    f"👥 수량: {order['qty']:,}명\n"
-                    f"🕐 시간: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
+                chat_id=chat_id,
+                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} {method}\n- 주문 수량: {order['qty']:,}명"
             )
-        except Exception as e:
-            print("관리자 알림 전송 실패:", e)
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text="🎁 유령을 받을 주소를 신중히 입력하세요!"
+            )
 
-    # 주문 삭제
-    del pending_orders[user_id]
+            # 관리자 알림
+            if ADMIN_CHAT_ID:
+                await app.bot.send_message(
+                    chat_id=int(ADMIN_CHAT_ID),
+                    text=(
+                        f"✅ [결제 완료 알림]\n"
+                        f"👤 사용자 ID: {user_id}\n"
+                        f"💰 금액: {amount} {method}\n"
+                        f"👥 수량: {order['qty']:,}명\n"
+                        f"🔗 TxID: {tx.get('transaction_id') or tx.get('hash')}"
+                    )
+                )
+
+            del pending_orders[user_id]
+            break
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
