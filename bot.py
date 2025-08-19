@@ -205,7 +205,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
     # Tron 결제 감시 태스크 시작
-    asyncio.get_event_loop().create_task(check_tron_payments(app))
+    asyncio.get_running_loop().create_task(check_tron_payments(app))
 
     print("✅ 유령 자판기 실행 중... (polling)")
     app.run_polling()
