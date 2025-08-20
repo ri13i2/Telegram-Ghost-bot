@@ -1,31 +1,50 @@
-# bot.py
+# bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림 (간편판)
 import os
 import asyncio
-import aiohttp
+import logging
 from pathlib import Path
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, filters
 )
+import aiohttp
 
 # ─────────────────────────────────────────────
-# ENV 로드
+# 환경 변수 로드
 # ─────────────────────────────────────────────
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
-BOT_TOKEN = (
-    os.getenv("BOT_TOKEN")
-    or os.getenv("TOKEN")
-    or os.getenv("TELEGRAM_TOKEN")
-)
 
+BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TOKEN") or os.getenv("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다.")
 
+PAYMENT_ADDRESS = (os.getenv("PAYMENT_ADDRESS") or "").strip()
+if not PAYMENT_ADDRESS:
+    raise RuntimeError("PAYMENT_ADDRESS가 설정되지 않았습니다.")
+
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")
+
+USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj").strip()
+try:
+    PER_100_PRICE = Decimal(os.getenv("PER_100_PRICE", "7.21"))
+except InvalidOperation:
+    PER_100_PRICE = Decimal("7.21")
+PER_100_PRICE = PER_100_PRICE.quantize(Decimal("0.01"))
+
 # ─────────────────────────────────────────────
-# 상수
+# 로깅
+# ─────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+log = logging.getLogger("paybot")
+
+# ─────────────────────────────────────────────
+# 안내 텍스트 (문구만 바꿔서 사용)
 # ─────────────────────────────────────────────
 WELCOME_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
@@ -53,12 +72,12 @@ NOTICE_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
-PER_100_PRICE = Decimal("7.21")  # 100명당 가격 (USDT 기준)
-PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
-USDT_CONTRACT = "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"  # USDT(TRC20) 공식 컨트랙트 주소
-
-# 결제 대기 주문 저장소
-pending_orders = {}  # {user_id: {"qty": int, "amount": Decimal, "chat_id": int}}
+# ─────────────────────────────────────────────
+# 간단 저장소
+# {user_id: {"qty": int, "amount": Decimal, "chat_id": int}}
+# ─────────────────────────────────────────────
+pending_orders = {}
+processed_txs = set()  # 중복 처리 방지
 
 # ─────────────────────────────────────────────
 # 키보드
@@ -91,23 +110,22 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "menu:ghost":
         kb = [
-            [InlineKeyboardButton("100명 - 7.21 USDT", callback_data="ghost:100")],
-            [InlineKeyboardButton("500명 - 36.06 USDT", callback_data="ghost:500")],
-            [InlineKeyboardButton("1,000명 - 72.11 USDT", callback_data="ghost:1000")],
+            [InlineKeyboardButton(f"100명 - {PER_100_PRICE:.2f} USDT", callback_data="pkg:100")],
+            [InlineKeyboardButton(f"500명 - {(PER_100_PRICE*Decimal(5)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:500")],
+            [InlineKeyboardButton(f"1,000명 - {(PER_100_PRICE*Decimal(10)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:1000")],
             [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
         ]
-        await q.edit_message_text("🔴 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("📦 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
 
     elif q.data.startswith("ghost:"):
         base = int(q.data.split(":")[1])
-        context.user_data["awaiting_ghost_qty"] = True
-        context.user_data["ghost_base"] = base
+        context.user_data["awaiting_qty"] = True
+        context.user_data["base"] = base
         await q.edit_message_text(
-            f"💫 {base:,}명을 선택하셨습니다!\n"
-            f"📌 몇 개를 구매하시겠습니까?\n\n"
-            f"※ 100단위로만 입력 가능합니다. (예: 600, 1000, 3000)",
+            f"✅ {base:,} 단위를 선택하셨습니다.\n"
+            f"🧮 구매하실 총 수량(100단위) 숫자만 입력: 예) 600, 1000, 3000",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")],
+                [InlineKeyboardButton("⬅️ 돌아가기", callback_data="menu:pkg")],
                 [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
             ])
         )
@@ -124,34 +142,33 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer("준비 중입니다.", show_alert=True)
 
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_ghost_qty"):
+    if not context.user_data.get("awaiting_qty"):
         return
 
     text = update.message.text.strip().replace(",", "")
     if not text.isdigit():
-        await update.message.reply_text("수량은 숫자만 입력해주세요. (예: 600, 1000)")
+        await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000")
         return
 
     qty = int(text)
     if qty < 100 or qty % 100 != 0:
-        await update.message.reply_text("❌ 100단위로 입력해주세요. (예: 600, 1000, 3000)")
+        await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000")
         return
 
-    context.user_data["awaiting_ghost_qty"] = False
-    context.user_data["ghost_qty"] = qty
+    context.user_data["awaiting_qty"] = False
+    context.user_data["qty"] = qty
 
     blocks = qty // 100
     total = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-    context.user_data["ghost_amount"] = total
-    context.user_data["ghost_qty"] = qty
+    context.user_data["amount"] = total
 
     await update.message.reply_text(
-        f"💵 예상 결제금액: {total} USDT (100명당 {PER_100_PRICE} USDT 기준)\n\n"
-        "💳 결제는 USDT(TRC20)으로만 가능합니다.",
+        f"💳 결제 금액: {total} USDT (100명당 {PER_100_PRICE} USDT)\n"
+        f"네트워크: TRON(TRC20)\n"
+        f"결제 수단: USDT(TRC20)",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("USDT-TRC20", callback_data="pay:USDT")],
-            [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")]
+            [InlineKeyboardButton("USDT(TRC20) 결제", callback_data="pay:USDT")],
+            [InlineKeyboardButton("⬅️ 돌아가기", callback_data="menu:pkg")]
         ])
     )
 
@@ -171,12 +188,13 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
 
     await q.edit_message_text(
-        f"🧾 주문 요약\n"
+        "🧾 주문 요약\n"
         f"- 유령인원: {qty:,}명\n"
-        f"- 결제수단: USDT-TRC20\n"
+        f"- 결제수단: USDT(TRC20)\n"
         f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
         f"- 결제금액: {amount} USDT\n\n"
-        f"결제가 완료되면 자동 확인됩니다 ✅",
+        "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+        "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
@@ -184,68 +202,138 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# TRC20 USDT 전송 확률 기반 확인 로직
+# TRC20 USDT 전송 확인 (간편/안전)
 # ─────────────────────────────────────────────
+TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)"}
+
+def _to_decimal_amount(raw, token_decimals: int):
+    if raw is None:
+        return None
+    try:
+        s = str(raw)
+        if s.isdigit():  # amountUInt64 같은 정수형
+            return (Decimal(s) / (Decimal(10) ** token_decimals)).quantize(Decimal("0.000000"))
+        return Decimal(s)
+    except InvalidOperation:
+        return None
+
 async def check_tron_payments(app):
-    url = f"https://apilist.tronscanapi.com/api/token_trc20/transfers?sort=-timestamp&limit=20&start=0&address={PAYMENT_ADDRESS}"
+    params = {
+        "sort": "-timestamp",
+        "limit": "40",
+        "start": "0",
+        "address": PAYMENT_ADDRESS
+    }
 
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        txs = data.get("token_transfers", [])
+    async with aiohttp.ClientSession() as session:
+        while True:
+            try:
+                async with session.get(TRONSCAN_URL, params=params, headers=HEADERS, timeout=30) as resp:
+                    if resp.status != 200:
+                        log.warning("[Tronscan] HTTP %s, 잠시 후 재시도", resp.status)
+                        await asyncio.sleep(15)
+                        continue
 
-                        for user_id, order in list(pending_orders.items()):
-                            expected_amount = float(order["amount"])
-                            for tx in txs:
-                                symbol = tx.get("tokenAbbr") or tx.get("symbol")
-                                contract_address = tx.get("contract_address")
-                                to_address = tx.get("to_address")
+                    data = await resp.json()
+                    txs = data.get("token_transfers", []) or []
 
-                                raw = tx.get("amount") or tx.get("amount_str") or tx.get("amountUInt64")
-                                decimals = int(tx.get("tokenDecimal", 6))
-                                amount = float(raw) / (10 ** decimals)
+                    if not pending_orders:
+                        await asyncio.sleep(20)
+                        continue
 
-                                # 디버그 로그로 확인
-                                print("trx hash:", tx.get("transaction_id"))
-                                print("  symbol:", symbol, "contract:", contract_address)
-                                print("  to:", to_address, "amount:", amount, "expected:", expected_amount)
+                    for tx in txs:
+                        try:
+                            txid = tx.get("transaction_id") or tx.get("hash")
+                            if not txid or txid in processed_txs:
+                                continue
 
-                                if symbol.upper() == "USDT" and abs(amount - expected_amount) < 0.05:
+                            symbol = (tx.get("tokenAbbr") or tx.get("symbol") or "").upper()
+                            contract = (tx.get("contract_address") or "").strip()
+                            to_addr = (tx.get("to_address") or "").strip()
+                            from_addr = (tx.get("from_address") or "").strip()
+
+                            token_decimals = int(tx.get("tokenDecimal", 6))
+                            raw = tx.get("amount") or tx.get("amount_str") or tx.get("amountUInt64")
+                            amount = _to_decimal_amount(raw, token_decimals)
+                            if amount is None:
+                                continue
+
+                            # 필터: USDT / 공식 컨트랙트 / 내 주소 수취
+                            if symbol != "USDT":
+                                continue
+                            if contract != USDT_CONTRACT:
+                                continue
+                            if to_addr != PAYMENT_ADDRESS:
+                                continue
+
+                            # 대기 주문과 금액 매칭 (±0.001 허용)
+                            for user_id, order in list(pending_orders.items()):
+                                expected: Decimal = order["amount"]
+                                if abs(amount - expected) <= Decimal("0.001"):
                                     chat_id = order["chat_id"]
-                                    await app.bot.send_message(
-                                        chat_id=chat_id,
-                                        text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
-                                    )
-                                    await app.bot.send_message(
-                                        chat_id=chat_id,
-                                        text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-                                    )
+                                    qty = order["qty"]
+
+                                    # 고객 알림
+                                    try:
+                                        await app.bot.send_message(
+                                            chat_id=chat_id,
+                                            text=(
+                                                "✅ 결제가 확인되었습니다!\n"
+                                                f"- 금액: {amount:.2f} USDT\n"
+                                                f"- 주문 수량: {qty:,}\n\n"
+                                                "📨 전달 받을 정보를 회신해주세요. (이메일/링크 등)"
+                                            )
+                                        )
+                                    except Exception as ee:
+                                        log.error("고객 알림 실패: %s", ee)
+
+                                    # 운영자 알림
+                                    if ADMIN_CHAT_ID:
+                                        try:
+                                            await app.bot.send_message(
+                                                chat_id=ADMIN_CHAT_ID,
+                                                text=(
+                                                    "🟢 [결제 확인]\n"
+                                                    f"- TXID: `{txid}`\n"
+                                                    f"- From: `{from_addr}`\n"
+                                                    f"- To  : `{to_addr}`\n"
+                                                    f"- 금액: {amount:.2f} USDT\n"
+                                                    f"- 주문자(UserID): {user_id}\n"
+                                                    f"- 수량: {qty:,}"
+                                                ),
+                                                parse_mode="Markdown"
+                                            )
+                                        except Exception as ee:
+                                            log.error("운영자 알림 실패: %s", ee)
+
+                                    processed_txs.add(txid)
                                     del pending_orders[user_id]
-                                    break
+                                    break  # 이 TX 처리 완료
 
-        except Exception as e:
-            print("결제 확인 에러:", e)
+                        except Exception as tx_err:
+                            log.exception("TX 처리 중 오류: %s", tx_err)
 
-        await asyncio.sleep(30)
+            except Exception as e:
+                log.exception("결제 확인 루프 오류: %s", e)
+
+            await asyncio.sleep(15)
 
 # ─────────────────────────────────────────────
-# 앱 구동 (Railway friendly)
+# 앱 구동
 # ─────────────────────────────────────────────
 async def on_startup(app):
     asyncio.create_task(check_tron_payments(app))
-    print("🔄 TRC20 결제 확인 태스크 시작됨")
+    log.info("🔄 TRC20 결제 확인 태스크 시작: %s", PAYMENT_ADDRESS)
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main|menu:notice)$"))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:pkg|pkg:\d+|back:main|menu:notice)$"))
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:USDT$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
-    print("✅ 유령 자판기 실행 중... (Railway)")
+    log.info("✅ 유령 자판기 실행중...")
     app.run_polling()
 
 if __name__ == "__main__":
