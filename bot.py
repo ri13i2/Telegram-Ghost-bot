@@ -1,4 +1,4 @@
-# bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림 (간편판)
+# bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림 (패키지 선택 포함 버전)
 import os
 import asyncio
 import logging
@@ -28,6 +28,7 @@ if not PAYMENT_ADDRESS:
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")
 
 USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj").strip()
+
 try:
     PER_100_PRICE = Decimal(os.getenv("PER_100_PRICE", "7.21"))
 except InvalidOperation:
@@ -44,7 +45,7 @@ logging.basicConfig(
 log = logging.getLogger("paybot")
 
 # ─────────────────────────────────────────────
-# 안내 텍스트 (문구만 바꿔서 사용)
+# 안내 텍스트
 # ─────────────────────────────────────────────
 WELCOME_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
@@ -98,6 +99,14 @@ def main_menu_kb():
         ],
     ])
 
+def pkg_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"100명 - {PER_100_PRICE:.2f} USDT", callback_data="pkg:100")],
+        [InlineKeyboardButton(f"500명 - {(PER_100_PRICE * Decimal(5)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:500")],
+        [InlineKeyboardButton(f"1,000명 - {(PER_100_PRICE * Decimal(10)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:1000")],
+        [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
+    ])
+
 # ─────────────────────────────────────────────
 # 핸들러들
 # ─────────────────────────────────────────────
@@ -109,68 +118,56 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     if q.data == "menu:ghost":
-        kb = [
-            [InlineKeyboardButton(f"100명 - {PER_100_PRICE:.2f} USDT", callback_data="pkg:100")],
-            [InlineKeyboardButton(f"500명 - {(PER_100_PRICE*Decimal(5)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:500")],
-            [InlineKeyboardButton(f"1,000명 - {(PER_100_PRICE*Decimal(10)).quantize(Decimal('0.01')):.2f} USDT", callback_data="pkg:1000")],
-            [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
-        ]
-        await q.edit_message_text("📦 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
+        await q.edit_message_text("📦 인원수를 선택하세요", reply_markup=pkg_menu_kb())
+        return
 
-    elif q.data.startswith("ghost:"):
-        base = int(q.data.split(":")[1])
-        context.user_data["awaiting_qty"] = True
-        context.user_data["base"] = base
+    if q.data.startswith("pkg:"):
+        # 패키지 수량 선택
+        try:
+            qty = int(q.data.split(":")[1])
+        except ValueError:
+            await q.answer("수량을 확인할 수 없습니다.", show_alert=True)
+            return
+
+        if qty < 100 or qty % 100 != 0:
+            await q.answer("100 단위로만 선택 가능합니다.", show_alert=True)
+            return
+
+        blocks = qty // 100
+        amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 이후 결제 단계에서 사용될 값 저장
+        context.user_data["ghost_qty"] = qty
+        context.user_data["ghost_amount"] = amount
+
         await q.edit_message_text(
-            f"✅ {base:,} 단위를 선택하셨습니다.\n"
-            f"🧮 구매하실 총 수량(100단위) 숫자만 입력: 예) 600, 1000, 3000",
+            "🧾 주문 요약\n"
+            f"- 유령인원: {qty:,}명\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+            f"- 결제금액: {amount} USDT\n\n"
+            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬅️ 돌아가기", callback_data="menu:pkg")],
+                [InlineKeyboardButton("💳 USDT(TRC20) 결제", callback_data="pay:USDT")],
+                [InlineKeyboardButton("⬅️ 수량 다시 선택", callback_data="menu:ghost")],
                 [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
             ])
         )
+        return
 
-    elif q.data == "menu:notice":
+    if q.data == "menu:notice":
         await q.edit_message_text(NOTICE_TEXT, reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
         ]))
+        return
 
-    elif q.data == "back:main":
+    if q.data == "back:main":
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
-
-    else:
-        await q.answer("준비 중입니다.", show_alert=True)
-
-async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_qty"):
         return
 
-    text = update.message.text.strip().replace(",", "")
-    if not text.isdigit():
-        await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000")
-        return
-
-    qty = int(text)
-    if qty < 100 or qty % 100 != 0:
-        await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000")
-        return
-
-    context.user_data["awaiting_qty"] = False
-    context.user_data["qty"] = qty
-
-    blocks = qty // 100
-    total = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    context.user_data["amount"] = total
-
-    await update.message.reply_text(
-        f"💳 결제 금액: {total} USDT (100명당 {PER_100_PRICE} USDT)\n"
-        f"네트워크: TRON(TRC20)\n"
-        f"결제 수단: USDT(TRC20)",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("USDT(TRC20) 결제", callback_data="pay:USDT")],
-            [InlineKeyboardButton("⬅️ 돌아가기", callback_data="menu:pkg")]
-        ])
-    )
+    await q.answer("준비 중입니다.", show_alert=True)
 
 async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -178,7 +175,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     qty = context.user_data.get("ghost_qty")
     amount = context.user_data.get("ghost_amount")
-    chat_id = q.message.chat_id
+    chat_id = q.message.chat.id
     user_id = q.from_user.id
 
     if not qty or not amount:
@@ -268,7 +265,7 @@ async def check_tron_payments(app):
                                 continue
 
                             # 대기 주문과 금액 매칭 (±0.001 허용)
-                            for user_id, order in list(pending_orders.items()):
+                            for uid, order in list(pending_orders.items()):
                                 expected: Decimal = order["amount"]
                                 if abs(amount - expected) <= Decimal("0.001"):
                                     chat_id = order["chat_id"]
@@ -298,8 +295,8 @@ async def check_tron_payments(app):
                                                     f"- TXID: `{txid}`\n"
                                                     f"- From: `{from_addr}`\n"
                                                     f"- To  : `{to_addr}`\n"
-                                                    f"- 금액: {amount:.2f} USDT\n"
-                                                    f"- 주문자(UserID): {user_id}\n"
+                                                    f"- 금액: {amount:.6f} USDT\n"
+                                                    f"- 주문자(UserID): {uid}\n"
                                                     f"- 수량: {qty:,}"
                                                 ),
                                                 parse_mode="Markdown"
@@ -308,7 +305,7 @@ async def check_tron_payments(app):
                                             log.error("운영자 알림 실패: %s", ee)
 
                                     processed_txs.add(txid)
-                                    del pending_orders[user_id]
+                                    del pending_orders[uid]
                                     break  # 이 TX 처리 완료
 
                         except Exception as tx_err:
@@ -328,10 +325,15 @@ async def on_startup(app):
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:pkg|pkg:\d+|back:main|menu:notice)$"))
+
+    # 패키지 포함: menu:ghost, pkg:\d+, 메뉴/공지/뒤로가기
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|pkg:\d+|menu:notice|back:main)$"))
     app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:USDT$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+
+    # (옵션) 텍스트 입력 핸들러는 현재 사용 안 함. 남겨둬도 무해.
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda *_: None))
 
     log.info("✅ 유령 자판기 실행중...")
     app.run_polling()
