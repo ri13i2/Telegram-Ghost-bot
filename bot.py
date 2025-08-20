@@ -184,10 +184,10 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron TRC20 결제 확인 로직 (디버깅 로그 강화)
+# Tron TRC20 결제 확인 로직 (USDT 전용)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
-    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
+    url = f"https://apilist.tronscanapi.com/api/token_trc20/transfers?sort=-timestamp&limit=20&start=0&address={PAYMENT_ADDRESS}"
 
     while True:
         try:
@@ -195,27 +195,31 @@ async def check_tron_payments(app):
                 async with session.get(url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        txs = data.get("data", [])
+                        txs = data.get("token_transfers", [])
 
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
                             for tx in txs:
-                                contractType = tx.get("contractType")
-                                tokenInfo = tx.get("tokenInfo", {})
-                                token_abbr = tokenInfo.get("tokenAbbr")
-                                token_id = tokenInfo.get("tokenId")
+                                token_abbr = tx.get("tokenAbbr")
+                                token_name = tx.get("tokenName")
+                                contract_address = tx.get("contract_address")
+                                to_address = tx.get("to_address")
+                                from_address = tx.get("from_address")
+
+                                # TRC20 전송 금액 (소수점 처리)
                                 amount_raw = tx.get("amount", 0)
-                                amount = float(amount_raw) / (10 ** int(tokenInfo.get("tokenDecimal", 6)))
+                                decimals = int(tx.get("tokenDecimal", 6))
+                                amount = float(amount_raw) / (10 ** decimals)
 
                                 # ────── 디버깅 로그 ──────
-                                print("체크된 트랜잭션:", tx.get("hash"))
-                                print(f"  contractType={contractType}, tokenAbbr={token_abbr}, tokenId={token_id}")
-                                print(f"  수신 주소={tx.get('toAddress')}, 보낸 주소={tx.get('ownerAddress')}")
+                                print("체크된 트랜잭션:", tx.get("transaction_id"))
+                                print(f"  tokenAbbr={token_abbr}, tokenName={token_name}, contract={contract_address}")
+                                print(f"  수신={to_address}, 보낸={from_address}")
                                 print(f"  전송 금액={amount}, 예상 금액={expected_amount}")
 
-                                # USDT(TRC20)만 체크
-                                if contractType == 31 and (token_abbr == "USDT" or token_id == USDT_CONTRACT):
-                                    if abs(amount - expected_amount) < 0.05:
+                                # ✅ USDT(TRC20)만 체크
+                                if token_abbr == "USDT" and to_address == PAYMENT_ADDRESS:
+                                    if abs(amount - expected_amount) < 0.05:  # 소수점 오차 허용
                                         chat_id = order["chat_id"]
                                         await app.bot.send_message(
                                             chat_id=chat_id,
@@ -231,7 +235,6 @@ async def check_tron_payments(app):
             print("결제 확인 에러:", e)
 
         await asyncio.sleep(30)
-
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
