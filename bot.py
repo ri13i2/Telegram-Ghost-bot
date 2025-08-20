@@ -53,8 +53,9 @@ NOTICE_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
-PER_100_PRICE = Decimal("7.21")  # 100명당 가격 (TRON)
+PER_100_PRICE = Decimal("7.21")  # 100명당 가격 (USDT 기준)
 PAYMENT_ADDRESS = "TPhHDf6YZo7kAG8VxqWKK2TKC9wU2MrowH"
+USDT_CONTRACT = "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj"  # USDT(TRC20) 공식 컨트랙트 주소
 
 # 결제 대기 주문 저장소
 pending_orders = {}  # {user_id: {"qty": int, "amount": Decimal, "chat_id": int}}
@@ -90,9 +91,9 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if q.data == "menu:ghost":
         kb = [
-            [InlineKeyboardButton("100명 - 7.21 TRON", callback_data="ghost:100")],
-            [InlineKeyboardButton("500명 - 36.05 TRON", callback_data="ghost:500")],
-            [InlineKeyboardButton("1,000명 - 72.10 TRON", callback_data="ghost:1000")],
+            [InlineKeyboardButton("100명 - 7.21 USDT", callback_data="ghost:100")],
+            [InlineKeyboardButton("500명 - 36.06 USDT", callback_data="ghost:500")],
+            [InlineKeyboardButton("1,000명 - 72.11 USDT", callback_data="ghost:1000")],
             [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
         ]
         await q.edit_message_text("🔴 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
@@ -103,7 +104,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["ghost_base"] = base
         await q.edit_message_text(
             f"💫 {base:,}명을 선택하셨습니다!\n"
-            f"📌 몇 명을 구매하시겠습니까?\n\n"
+            f"📌 몇 개를 구매하시겠습니까?\n\n"
             f"※ 100단위로만 입력 가능합니다. (예: 600, 1000, 3000)",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")],
@@ -146,10 +147,10 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["ghost_qty"] = qty
 
     await update.message.reply_text(
-        f"💵 예상 결제금액: {total} TRON (100명당 {PER_100_PRICE} TRON 기준)\n\n"
-        "💳 아래 버튼을 눌러 결제를 진행하세요.",
+        f"💵 예상 결제금액: {total} USDT (100명당 {PER_100_PRICE} USDT 기준)\n\n"
+        "💳 결제는 USDT(TRC20)으로만 가능합니다.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("TRON 결제", callback_data="pay:TRON")],
+            [InlineKeyboardButton("USDT-TRC20", callback_data="pay:USDT")],
             [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")]
         ])
     )
@@ -157,7 +158,6 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    method = q.data.split(":")[1]
 
     qty = context.user_data.get("ghost_qty")
     amount = context.user_data.get("ghost_amount")
@@ -173,9 +173,9 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.edit_message_text(
         f"🧾 주문 요약\n"
         f"- 유령인원: {qty:,}명\n"
-        f"- 결제수단: {method}\n"
+        f"- 결제수단: USDT-TRC20\n"
         f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-        f"- 결제금액: {amount} TRON\n\n"
+        f"- 결제금액: {amount} USDT\n\n"
         f"결제가 완료되면 자동 확인됩니다 ✅",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
@@ -184,7 +184,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron 결제 확인 로직
+# Tron TRC20 결제 확인 로직
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -199,22 +199,24 @@ async def check_tron_payments(app):
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
                             for tx in txs:
-                                if tx.get("contractType") == 1:  # TransferContract
-                                    amount = tx.get("amount", 0) / 1e6
-                                    if abs(amount - expected_amount) < 0.01:  # 금액 매칭
-                                        chat_id = order["chat_id"]
-                                        # 1단계: 결제 확인 메시지
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} TRON\n- 주문 수량: {order['qty']:,}명"
-                                        )
-                                        # 2단계: 주소 입력 요청 메시지
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-                                        )
-                                        del pending_orders[user_id]
-                                        break
+                                # TRC20 토큰 전송만 체크
+                                if tx.get("contractType") == 31:  # TriggerSmartContract
+                                    contractData = tx.get("contractData", {})
+                                    tokenInfo = tx.get("tokenInfo", {})
+                                    if tokenInfo.get("tokenId") == USDT_CONTRACT or tokenInfo.get("tokenAbbr") == "USDT":
+                                        amount = tx.get("amount", 0) / 1e6
+                                        if abs(amount - expected_amount) < 0.01:
+                                            chat_id = order["chat_id"]
+                                            await app.bot.send_message(
+                                                chat_id=chat_id,
+                                                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
+                                            )
+                                            await app.bot.send_message(
+                                                chat_id=chat_id,
+                                                text="🎁 유령을 받을 주소를 신중히 입력하세요!"
+                                            )
+                                            del pending_orders[user_id]
+                                            break
         except Exception as e:
             print("결제 확인 에러:", e)
 
@@ -225,13 +227,13 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 async def on_startup(app):
     asyncio.create_task(check_tron_payments(app))
-    print("🔄 Tron 결제 확인 태스크 시작됨")
+    print("🔄 TRC20 결제 확인 태스크 시작됨")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main|menu:notice)$"))
-    app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:TRON$"))
+    app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^pay:USDT$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
     print("✅ 유령 자판기 실행 중... (Railway)")
