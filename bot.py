@@ -184,7 +184,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron TRC20 결제 확인 로직 (수정 보완)
+# Tron TRC20 + Tron(TRX) 네트워크 호환 결제 확인 로직
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -199,41 +199,28 @@ async def check_tron_payments(app):
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
                             for tx in txs:
-                                # 디버깅 로그
-                                print("체크된 트랜잭션:", tx)
+                                contractType = tx.get("contractType")
+                                tokenInfo = tx.get("tokenInfo", {})
+                                amount = tx.get("amount", 0) / 1e6
 
-                                if tx.get("contractType") == 31:  # TRC20 Transfer
-                                    trigger_info = tx.get("trigger_info", {})
-                                    param_value = (
-                                        trigger_info.get("parameter", {})
-                                        .get("value", {})
-                                    )
-
-                                    contract_address = param_value.get("contract_address")
-                                    raw_amount = param_value.get("amount", 0)
-                                    amount = raw_amount / 1e6
-
-                                    print("계산된 amount:", amount, "예상 금액:", expected_amount)
-
-                                    # USDT 컨트랙트 주소 확인
-                                    if contract_address == USDT_CONTRACT:
-                                        if round(amount, 2) == round(expected_amount, 2) or abs(amount - expected_amount) < 0.05:
-                                            chat_id = order["chat_id"]
-                                            await app.bot.send_message(
-                                                chat_id=chat_id,
-                                                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
-                                            )
-                                            await app.bot.send_message(
-                                                chat_id=chat_id,
-                                                text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-                                            )
-                                            del pending_orders[user_id]
-                                            break
+                                # ✅ Tron 네트워크에서 온 모든 USDT 전송 허용
+                                if (contractType == 31 and tokenInfo.get("tokenAbbr", "").upper() == "USDT"):
+                                    if round(amount, 2) == round(expected_amount, 2) or abs(amount - expected_amount) < 0.05:
+                                        chat_id = order["chat_id"]
+                                        await app.bot.send_message(
+                                            chat_id=chat_id,
+                                            text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
+                                        )
+                                        await app.bot.send_message(
+                                            chat_id=chat_id,
+                                            text="🎁 유령을 받을 주소를 신중히 입력하세요!"
+                                        )
+                                        del pending_orders[user_id]
+                                        break
         except Exception as e:
             print("결제 확인 에러:", e)
 
         await asyncio.sleep(30)
-
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
