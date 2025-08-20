@@ -184,7 +184,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron TRC20 결제 확인 로직
+# Tron TRC20 결제 확인 로직 (수정됨)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -203,13 +203,28 @@ async def check_tron_payments(app):
                                 if tx.get("contractType") == 31:  # TriggerSmartContract
                                     contractData = tx.get("contractData", {})
                                     tokenInfo = tx.get("tokenInfo", {})
-                                    if tokenInfo.get("tokenId") == USDT_CONTRACT or tokenInfo.get("tokenAbbr") == "USDT":
-                                        amount = tx.get("amount", 0) / 1e6
+
+                                    # USDT(TRC20) 전송인지 확인
+                                    if (
+                                        tokenInfo.get("tokenId") == USDT_CONTRACT
+                                        or tokenInfo.get("tokenAbbr") == "USDT"
+                                    ):
+                                        raw_amount = tx.get("amount", 0)
+
+                                        try:
+                                            amount = float(raw_amount) / 1e6
+                                        except Exception:
+                                            continue  # 변환 실패 시 건너뜀
+
                                         if abs(amount - expected_amount) < 0.01:
                                             chat_id = order["chat_id"]
                                             await app.bot.send_message(
                                                 chat_id=chat_id,
-                                                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
+                                                text=(
+                                                    f"⭕️ 결제가 확인되었습니다!\n"
+                                                    f"- 금액: {amount} USDT\n"
+                                                    f"- 주문 수량: {order['qty']:,}명"
+                                                )
                                             )
                                             await app.bot.send_message(
                                                 chat_id=chat_id,
