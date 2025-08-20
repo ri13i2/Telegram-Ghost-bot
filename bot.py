@@ -184,7 +184,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# Tron TRC20 + Tron(TRX) 네트워크 호환 결제 확인 로직
+# Tron TRC20 결제 확인 로직 (디버깅 로그 강화)
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
@@ -196,16 +196,26 @@ async def check_tron_payments(app):
                     if resp.status == 200:
                         data = await resp.json()
                         txs = data.get("data", [])
+
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
                             for tx in txs:
                                 contractType = tx.get("contractType")
                                 tokenInfo = tx.get("tokenInfo", {})
-                                amount = tx.get("amount", 0) / 1e6
+                                token_abbr = tokenInfo.get("tokenAbbr")
+                                token_id = tokenInfo.get("tokenId")
+                                amount_raw = tx.get("amount", 0)
+                                amount = float(amount_raw) / (10 ** int(tokenInfo.get("tokenDecimal", 6)))
 
-                                # ✅ Tron 네트워크에서 온 모든 USDT 전송 허용
-                                if (contractType == 31 and tokenInfo.get("tokenAbbr", "").upper() == "USDT"):
-                                    if round(amount, 2) == round(expected_amount, 2) or abs(amount - expected_amount) < 0.05:
+                                # ────── 디버깅 로그 ──────
+                                print("체크된 트랜잭션:", tx.get("hash"))
+                                print(f"  contractType={contractType}, tokenAbbr={token_abbr}, tokenId={token_id}")
+                                print(f"  수신 주소={tx.get('toAddress')}, 보낸 주소={tx.get('ownerAddress')}")
+                                print(f"  전송 금액={amount}, 예상 금액={expected_amount}")
+
+                                # USDT(TRC20)만 체크
+                                if contractType == 31 and (token_abbr == "USDT" or token_id == USDT_CONTRACT):
+                                    if abs(amount - expected_amount) < 0.05:
                                         chat_id = order["chat_id"]
                                         await app.bot.send_message(
                                             chat_id=chat_id,
@@ -221,6 +231,7 @@ async def check_tron_payments(app):
             print("결제 확인 에러:", e)
 
         await asyncio.sleep(30)
+
 
 # ─────────────────────────────────────────────
 # 앱 구동 (Railway friendly)
