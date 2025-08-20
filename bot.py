@@ -183,9 +183,7 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     )
 
-# ─────────────────────────────────────────────
-# Tron TRC20 결제 확인 로직 (tokenTransferInfo 지원)
-# ─────────────────────────────────────────────
+# Tron 결제 확인 로직 (USDT + TRX 지원)
 async def check_tron_payments(app):
     url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
 
@@ -203,41 +201,31 @@ async def check_tron_payments(app):
                             for tx in txs:
                                 contractType = tx.get("contractType")
                                 tokenInfo = tx.get("tokenInfo", {})
-                                token_abbr = tokenInfo.get("tokenAbbr")
+                                token_abbr = tokenInfo.get("tokenAbbr", "").lower()
                                 token_id = tokenInfo.get("tokenId")
-                                amount = 0.0
+                                amount_raw = tx.get("amount", 0)
 
-                                # ────── 기본 금액 파싱 ──────
-                                if "amount" in tx:
-                                    amount = float(tx.get("amount", 0)) / (10 ** int(tokenInfo.get("tokenDecimal", 6)))
+                                # 소수점 보정
+                                decimals = int(tokenInfo.get("tokenDecimal", 6))
+                                amount = float(amount_raw) / (10 ** decimals)
 
-                                # ────── tokenTransferInfo에서 별도 확인 ──────
-                                if "tokenTransferInfo" in tx:
-                                    tti = tx["tokenTransferInfo"]
-                                    token_abbr = tti.get("symbol", token_abbr)
-                                    token_id = tti.get("tokenId", token_id)
-                                    amount = float(tti.get("amount", 0)) / (10 ** int(tti.get("decimals", 6)))
-
-                                # ────── 디버깅 로그 ──────
-                                print("체크된 트랜잭션:", tx.get("hash"))
-                                print(f"  contractType={contractType}, tokenAbbr={token_abbr}, tokenId={token_id}")
-                                print(f"  수신={tx.get('toAddress')}, 보낸={tx.get('ownerAddress')}")
-                                print(f"  전송 금액={amount}, 예상 금액={expected_amount}")
-
-                                # USDT(TRC20)만 체크
-                                if contractType == 31 and (token_abbr == "USDT" or token_id == USDT_CONTRACT):
+                                # ────── USDT (TRC20) 결제 ──────
+                                if contractType == 31 and (token_abbr == "usdt" or token_id == USDT_CONTRACT):
                                     if abs(amount - expected_amount) < 0.05:
                                         chat_id = order["chat_id"]
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
-                                        )
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text="🎁 유령을 받을 주소를 신중히 입력하세요!"
-                                        )
+                                        await app.bot.send_message(chat_id, "⭕️ 결제가 확인되었습니다!")
                                         del pending_orders[user_id]
                                         break
+
+                                # ────── TRX (네이티브) 결제 ──────
+                                if contractType == 1 and token_abbr == "trx":
+                                    # 가스비 고려 → 실제 전송 금액이 expected_amount 이상인지 체크
+                                    if amount >= expected_amount:
+                                        chat_id = order["chat_id"]
+                                        await app.bot.send_message(chat_id, "⭕️ 결제가 확인되었습니다!")
+                                        del pending_orders[user_id]
+                                        break
+
         except Exception as e:
             print("결제 확인 에러:", e)
 
