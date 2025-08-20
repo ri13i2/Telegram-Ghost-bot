@@ -199,32 +199,23 @@ async def check_tron_payments(app):
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
                             for tx in txs:
+                                # 디버깅 로그 추가
+                                print("체크된 트랜잭션:", tx)
+                                contractType = tx.get("contractType")
+                                tokenInfo = tx.get("tokenInfo", {})
+                                amount = tx.get("amount", 0) / 1e6
+
+                                print("계산된 amount:", amount, "예상 금액:", expected_amount)
+
                                 # TRC20 토큰 전송만 체크
-                                if tx.get("contractType") == 31:  # TriggerSmartContract
-                                    contractData = tx.get("contractData", {})
-                                    tokenInfo = tx.get("tokenInfo", {})
-
-                                    # USDT(TRC20) 전송인지 확인
-                                    if (
-                                        tokenInfo.get("tokenId") == USDT_CONTRACT
-                                        or tokenInfo.get("tokenAbbr") == "USDT"
-                                    ):
-                                        raw_amount = tx.get("amount", 0)
-
-                                        try:
-                                            amount = float(raw_amount) / 1e6
-                                        except Exception:
-                                            continue  # 변환 실패 시 건너뜀
-
-                                        if abs(amount - expected_amount) < 0.01:
+                                if contractType == 31:
+                                    if tokenInfo.get("tokenId") == USDT_CONTRACT or tokenInfo.get("tokenAbbr") == "USDT":
+                                        # 조건 완화 (소수점 오차 방지)
+                                        if round(amount, 2) == round(expected_amount, 2) or abs(amount - expected_amount) < 0.05:
                                             chat_id = order["chat_id"]
                                             await app.bot.send_message(
                                                 chat_id=chat_id,
-                                                text=(
-                                                    f"⭕️ 결제가 확인되었습니다!\n"
-                                                    f"- 금액: {amount} USDT\n"
-                                                    f"- 주문 수량: {order['qty']:,}명"
-                                                )
+                                                text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
                                             )
                                             await app.bot.send_message(
                                                 chat_id=chat_id,
