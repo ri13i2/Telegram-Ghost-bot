@@ -183,9 +183,11 @@ async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     )
 
-# Tron 결제 확인 로직 (USDT + TRX 지원)
+# ─────────────────────────────────────────────
+# TRC20 USDT 전송 확률 기반 확인 로직
+# ─────────────────────────────────────────────
 async def check_tron_payments(app):
-    url = f"https://apilist.tronscanapi.com/api/transaction?sort=-timestamp&count=true&limit=20&start=0&address={PAYMENT_ADDRESS}"
+    url = f"https://apilist.tronscanapi.com/api/token_trc20/transfers?sort=-timestamp&limit=20&start=0&address={PAYMENT_ADDRESS}"
 
     while True:
         try:
@@ -193,38 +195,36 @@ async def check_tron_payments(app):
                 async with session.get(url) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        txs = data.get("data", [])
+                        txs = data.get("token_transfers", [])
 
                         for user_id, order in list(pending_orders.items()):
                             expected_amount = float(order["amount"])
-
                             for tx in txs:
-                                contractType = tx.get("contractType")
-                                tokenInfo = tx.get("tokenInfo", {})
-                                token_abbr = tokenInfo.get("tokenAbbr", "").lower()
-                                token_id = tokenInfo.get("tokenId")
-                                amount_raw = tx.get("amount", 0)
+                                symbol = tx.get("tokenAbbr") or tx.get("symbol")
+                                contract_address = tx.get("contract_address")
+                                to_address = tx.get("to_address")
 
-                                # 소수점 보정
-                                decimals = int(tokenInfo.get("tokenDecimal", 6))
-                                amount = float(amount_raw) / (10 ** decimals)
+                                raw = tx.get("amount") or tx.get("amount_str") or tx.get("amountUInt64")
+                                decimals = int(tx.get("tokenDecimal", 6))
+                                amount = float(raw) / (10 ** decimals)
 
-                                # ────── USDT (TRC20) 결제 ──────
-                                if contractType == 31 and (token_abbr == "usdt" or token_id == USDT_CONTRACT):
-                                    if abs(amount - expected_amount) < 0.05:
-                                        chat_id = order["chat_id"]
-                                        await app.bot.send_message(chat_id, "⭕️ 결제가 확인되었습니다!")
-                                        del pending_orders[user_id]
-                                        break
+                                # 디버그 로그로 확인
+                                print("trx hash:", tx.get("transaction_id"))
+                                print("  symbol:", symbol, "contract:", contract_address)
+                                print("  to:", to_address, "amount:", amount, "expected:", expected_amount)
 
-                                # ────── TRX (네이티브) 결제 ──────
-                                if contractType == 1 and token_abbr == "trx":
-                                    # 가스비 고려 → 실제 전송 금액이 expected_amount 이상인지 체크
-                                    if amount >= expected_amount:
-                                        chat_id = order["chat_id"]
-                                        await app.bot.send_message(chat_id, "⭕️ 결제가 확인되었습니다!")
-                                        del pending_orders[user_id]
-                                        break
+                                if symbol.upper() == "USDT" and abs(amount - expected_amount) < 0.05:
+                                    chat_id = order["chat_id"]
+                                    await app.bot.send_message(
+                                        chat_id=chat_id,
+                                        text=f"⭕️ 결제가 확인되었습니다!\n- 금액: {amount} USDT\n- 주문 수량: {order['qty']:,}명"
+                                    )
+                                    await app.bot.send_message(
+                                        chat_id=chat_id,
+                                        text="🎁 유령을 받을 주소를 신중히 입력하세요!"
+                                    )
+                                    del pending_orders[user_id]
+                                    break
 
         except Exception as e:
             print("결제 확인 에러:", e)
