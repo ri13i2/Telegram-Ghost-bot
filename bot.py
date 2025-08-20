@@ -1,4 +1,6 @@
-# bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림 (텍스트 수량 입력 / 뒤로가기만 유지)
+# bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림
+# (텍스트 수량 입력 / 뒤로가기만 유지, 디버깅 로그 강화판)
+
 import os
 import asyncio
 import logging
@@ -27,8 +29,8 @@ if not PAYMENT_ADDRESS:
 
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")
 
-# TRON USDT(테더) 기본 컨트랙트 (메인넷)
-USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj").strip()
+# TRON USDT(TRC20) 공식 컨트랙트 (메인넷)
+USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").strip()
 
 try:
     PER_100_PRICE = Decimal(os.getenv("PER_100_PRICE", "7.21"))
@@ -36,14 +38,20 @@ except InvalidOperation:
     PER_100_PRICE = Decimal("7.21")
 PER_100_PRICE = PER_100_PRICE.quantize(Decimal("0.01"))
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
 # ─────────────────────────────────────────────
 # 로깅
 # ─────────────────────────────────────────────
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL, logging.DEBUG),
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
 log = logging.getLogger("paybot")
+
+masked_token = BOT_TOKEN[:10] + "..." if BOT_TOKEN else "N/A"
+log.info("🔧 CONFIG | token=%s admin=%s addr=%s contract=%s per100=%s log=%s",
+         masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT, PER_100_PRICE, LOG_LEVEL)
 
 # ─────────────────────────────────────────────
 # 안내 텍스트
@@ -60,18 +68,12 @@ WELCOME_TEXT = (
 
 NOTICE_TEXT = (
     " 유령 자판기 이용법 🚩\n"
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
-    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n\n"
-    "• 유령 인입 과정이 완료되기까지 그룹/채널 설정 금지\n"
-    "• 작업 완료 시간은 약 10~20분 소요\n"
-    "• 1개의 주소만 진행 가능합니다.\n"
-    "• 결제창 제한시간은 15분이며, 경과 시 처음부터 다시 결제 필요\n\n"
-    "• 자판기 이용법을 위반하여 발생하는 불상사는 책임지지 않습니다.\n\n"
-    "자판기 운영 취지:\n"
-    "① 잦은 계정 터짐 방지\n"
-    "② 본인 계정 노출 방지 (안전)\n"
-    "봇/대량 구매시 문의 바랍니다.\n"
-    "➖➖➖➖➖➖➖➖➖➖➖➖➖"
+    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n"
+    "• 유령 인입 완료 전까지 그룹/채널 설정 금지\n"
+    "• 작업 완료 시간: 약 10~20분\n"
+    "• 1개의 주소만 진행 가능\n"
+    "• 결제창 제한 15분 경과 시 최초부터 재결제 필요\n"
+    "• 위반으로 발생하는 불상사는 책임지지 않습니다.\n"
 )
 
 # ─────────────────────────────────────────────
@@ -86,18 +88,8 @@ processed_txs = set()  # 중복 처리 방지
 # ─────────────────────────────────────────────
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
-            InlineKeyboardButton("텔프유령인원", callback_data="menu:telf_ghost"),
-        ],
-        [
-            InlineKeyboardButton("조회수", callback_data="menu:views"),
-            InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
-        ],
-        [
-            InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
-            InlineKeyboardButton("문의하기", url="https://t.me/ghostsalesbot1"),
-        ],
+        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
+        [InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice")],
     ])
 
 def back_only_kb():
@@ -116,8 +108,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
 
     if q.data == "menu:ghost":
-        # 텍스트 수량 입력 유도 + 뒤로가기만
         context.user_data["awaiting_qty"] = True
+        log.info("[MENU] user=%s → awaiting_qty=True", q.from_user.id)
         await q.edit_message_text(
             "인원수를 말씀해주세요\n"
             "예: 100, 500, 1000  100단위만 가능합니다.\n"
@@ -131,7 +123,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if q.data == "back:main":
-        # 입력 대기 상태 해제
         context.user_data.pop("awaiting_qty", None)
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
         return
@@ -139,7 +130,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer("준비 중입니다.", show_alert=True)
 
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 유령 수량 텍스트 입력만 처리
     if not context.user_data.get("awaiting_qty"):
         return
 
@@ -153,7 +143,6 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
         return
 
-    # 상태 업데이트
     context.user_data["awaiting_qty"] = False
     context.user_data["ghost_qty"] = qty
 
@@ -161,12 +150,13 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     context.user_data["ghost_amount"] = amount
 
-    # 결제 대기 등록(버튼 없이 즉시)
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
     pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
 
-    # 주문 요약 전송 (뒤로가기만)
+    log.info("[ORDER] uid=%s qty=%s amount=%s chat_id=%s pending=%s",
+             user_id, qty, amount, chat_id, len(pending_orders))
+
     await update.message.reply_text(
         "🧾 주문 요약\n"
         f"- 유령인원: {qty:,}명\n"
@@ -197,60 +187,68 @@ def _to_decimal_amount(raw, token_decimals: int):
         return None
 
 async def check_tron_payments(app):
-    params = {
-        "sort": "-timestamp",
-        "limit": "40",
-        "start": "0",
-        "address": PAYMENT_ADDRESS
-    }
+    params = {"sort": "-timestamp", "limit": "50", "start": "0", "address": PAYMENT_ADDRESS}
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                # 대기 건수/처리건수 체크
+                log.debug("[LOOP] pending=%s processed=%s", len(pending_orders), len(processed_txs))
+
                 async with session.get(TRONSCAN_URL, params=params, headers=HEADERS, timeout=30) as resp:
                     if resp.status != 200:
                         log.warning("[Tronscan] HTTP %s, 잠시 후 재시도", resp.status)
-                        await asyncio.sleep(15)
+                        await asyncio.sleep(10)
                         continue
 
                     data = await resp.json()
                     txs = data.get("token_transfers", []) or []
+                    log.debug("[FETCH] txs=%s", len(txs))
 
                     if not pending_orders:
-                        await asyncio.sleep(20)
+                        await asyncio.sleep(10)
                         continue
 
                     for tx in txs:
                         try:
                             txid = tx.get("transaction_id") or tx.get("hash")
-                            if not txid or txid in processed_txs:
-                                continue
-
-                            symbol = (tx.get("tokenAbbr") or tx.get("symbol") or "").upper()
                             contract = (tx.get("contract_address") or "").strip()
                             to_addr = (tx.get("to_address") or "").strip()
                             from_addr = (tx.get("from_address") or "").strip()
-
                             token_decimals = int(tx.get("tokenDecimal", 6))
                             raw = tx.get("amount") or tx.get("amount_str") or tx.get("amountUInt64")
                             amount = _to_decimal_amount(raw, token_decimals)
-                            if amount is None:
+
+                            log.debug("[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
+                                      txid, contract, to_addr, raw, amount)
+
+                            if not txid or txid in processed_txs:
+                                if txid:
+                                    log.debug("[SKIP_DUP] %s", txid)
                                 continue
 
-                            # 필터: USDT / 공식 컨트랙트 / 내 주소 수취
-                            if symbol != "USDT":
+                            if amount is None:
+                                log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
                                 continue
+
+                            # 필터: 컨트랙트 & 수취주소 일치
                             if contract != USDT_CONTRACT:
+                                log.debug("[SKIP_CONTRACT] id=%s api=%s env=%s", txid, contract, USDT_CONTRACT)
                                 continue
                             if to_addr != PAYMENT_ADDRESS:
+                                log.debug("[SKIP_TO_ADDR] id=%s api=%s env=%s", txid, to_addr, PAYMENT_ADDRESS)
                                 continue
 
-                            # 대기 주문과 금액 매칭 (±0.001 허용)
+                            matched = False
                             for uid, order in list(pending_orders.items()):
                                 expected: Decimal = order["amount"]
-                                if abs(amount - expected) <= Decimal("0.001"):
+                                diff = (amount - expected)
+                                if abs(diff) <= Decimal("0.001"):
+                                    matched = True
                                     chat_id = order["chat_id"]
                                     qty = order["qty"]
+
+                                    log.info("[MATCH] tx=%s uid=%s amount=%s qty=%s", txid, uid, amount, qty)
 
                                     # 고객 알림
                                     try:
@@ -263,8 +261,9 @@ async def check_tron_payments(app):
                                                 "📨 전달 받을 정보를 회신해주세요. (이메일/링크 등)"
                                             )
                                         )
+                                        log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", uid, chat_id)
                                     except Exception as ee:
-                                        log.error("고객 알림 실패: %s", ee)
+                                        log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", uid, ee)
 
                                     # 운영자 알림
                                     if ADMIN_CHAT_ID:
@@ -282,37 +281,40 @@ async def check_tron_payments(app):
                                                 ),
                                                 parse_mode="Markdown"
                                             )
+                                            log.info("[NOTIFY_ADMIN_OK] uid=%s admin=%s", uid, ADMIN_CHAT_ID)
                                         except Exception as ee:
-                                            log.error("운영자 알림 실패: %s", ee)
+                                            log.error("[NOTIFY_ADMIN_FAIL] uid=%s err=%s", uid, ee)
 
                                     processed_txs.add(txid)
                                     del pending_orders[uid]
-                                    break  # 이 TX 처리 완료
+                                    break
+                                else:
+                                    log.debug("[MISS] id=%s uid=%s tx=%s expected=%s diff=%s",
+                                              txid, uid, amount, expected, diff)
+
+                            if not matched:
+                                log.debug("[UNMATCHED] id=%s amount=%s (orders=%s)", txid, amount, len(pending_orders))
 
                         except Exception as tx_err:
-                            log.exception("TX 처리 중 오류: %s", tx_err)
+                            log.exception("[TX_ERROR] %s", tx_err)
 
             except Exception as e:
-                log.exception("결제 확인 루프 오류: %s", e)
+                log.exception("[LOOP_ERROR] %s", e)
 
-            await asyncio.sleep(15)
+            await asyncio.sleep(10)
 
 # ─────────────────────────────────────────────
 # 앱 구동
 # ─────────────────────────────────────────────
 async def on_startup(app):
     asyncio.create_task(check_tron_payments(app))
-    log.info("🔄 TRC20 결제 확인 태스크 시작: %s", PAYMENT_ADDRESS)
+    log.info("🔄 TRC20 결제 확인 태스크 시작: addr=%s contract=%s", PAYMENT_ADDRESS, USDT_CONTRACT)
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
-
     app.add_handler(CommandHandler("start", start))
-    # 메뉴: 유령인원(텍스트 입력), 공지, 뒤로가기
     app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|menu:notice|back:main)$"))
-    # 텍스트 수량 입력
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
-
     log.info("✅ 유령 자판기 실행중...")
     app.run_polling()
 
