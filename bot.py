@@ -97,8 +97,6 @@ NOTICE_TEXT = (
 # ─────────────────────────────────────────────
 # 상태 저장 (주문/처리TX) — 파일 영구화
 # ─────────────────────────────────────────────
-# pending_orders: { user_id(str): {"qty": int, "amount": Decimal, "chat_id": int} }
-# processed_txs:  [ txid, ... ]
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
 
@@ -108,11 +106,11 @@ def _save_state():
             "pending_orders": {
                 str(uid): {
                     "qty": v["qty"],
-                    "amount": str(v["amount"]),  # Decimal -> str
+                    "amount": str(v["amount"]),
                     "chat_id": v["chat_id"],
                 } for uid, v in pending_orders.items()
             },
-            "processed_txs": list(processed_txs)[-2000:],  # 최대 2000개 유지
+            "processed_txs": list(processed_txs)[-2000:],
         }
         STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         log.debug("[STATE] saved pending=%s processed=%s", len(pending_orders), len(processed_txs))
@@ -141,7 +139,6 @@ def _load_state():
     except Exception as e:
         log.error("[STATE_LOAD_ERROR] %s", e)
 
-# 최초 로드
 _load_state()
 
 # ─────────────────────────────────────────────
@@ -162,6 +159,9 @@ def main_menu_kb():
             InlineKeyboardButton("문의하기", url="https://t.me/ghostsalesbot1"),
         ],
     ])
+
+def back_only_kb():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ 메뉴로 돌아가기", callback_data="back:main")]])
 
 # ─────────────────────────────────────────────
 # 핸들러들
@@ -196,7 +196,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer("준비 중입니다.", show_alert=True)
 
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 유령 수량 텍스트 입력만 처리
     if not context.user_data.get("awaiting_qty"):
         return
 
@@ -210,7 +209,6 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
         return
 
-    # 상태 업데이트
     context.user_data["awaiting_qty"] = False
     context.user_data["ghost_qty"] = qty
 
@@ -425,7 +423,11 @@ async def on_startup(app):
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|menu:notice|back:main)$"))
+    # 🔥 패턴 확장해서 메뉴 전체 버튼 대응
+    app.add_handler(CallbackQueryHandler(
+        menu_handler,
+        pattern=r"^(menu:ghost|menu:telf_ghost|menu:views|menu:reactions|menu:notice|back:main)$"
+    ))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
     log.info("✅ 유령 자판기 실행중...")
     app.run_polling()
