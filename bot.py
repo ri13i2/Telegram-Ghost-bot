@@ -1,5 +1,5 @@
 # bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림
-# (텍스트 수량 입력 / 뒤로가기만, 주문 영구 저장 + 미지정 입금 알림 + 디버깅 강화판)
+# (텍스트 수량 입력 / 뒤로가기만, 주문 영구 저장 + 미지정 입금 알림 + 디버깅 강화 + 허용오차 환경변수)
 
 import os
 import asyncio
@@ -36,11 +36,19 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")
 # TRON USDT(TRC20) 공식 컨트랙트 (메인넷)
 USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").strip()
 
+# ★ 변경: 안전한 Decimal 파서 + 허용오차 환경변수 지원
+def _dec(v, q="0.01", default="0.00"):
+    try:
+        return Decimal(str(v)).quantize(Decimal(q))
+    except Exception:
+        return Decimal(default).quantize(Decimal(q))
+
 try:
-    PER_100_PRICE = Decimal(os.getenv("PER_100_PRICE", "7.21"))
+    PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "7.21"))
 except InvalidOperation:
-    PER_100_PRICE = Decimal("7.21")
-PER_100_PRICE = PER_100_PRICE.quantize(Decimal("0.01"))
+    PER_100_PRICE = _dec("7.21")
+# 허용오차(매칭) 기본값 0.01 USDT
+AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 
@@ -54,8 +62,8 @@ logging.basicConfig(
 log = logging.getLogger("paybot")
 
 masked_token = BOT_TOKEN[:10] + "..." if BOT_TOKEN else "N/A"
-log.info("🔧 CONFIG | token=%s admin=%s addr=%s contract=%s per100=%s log=%s",
-         masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT, PER_100_PRICE, LOG_LEVEL)
+log.info("🔧 CONFIG | token=%s admin=%s addr=%s contract=%s per100=%s tol=±%s log=%s",
+         masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT, PER_100_PRICE, AMOUNT_TOLERANCE, LOG_LEVEL)
 
 # ─────────────────────────────────────────────
 # 안내 텍스트
@@ -89,7 +97,7 @@ NOTICE_TEXT = (
 # ─────────────────────────────────────────────
 # 상태 저장 (주문/처리TX) — 파일 영구화
 # ─────────────────────────────────────────────
-# pending_orders: { user_id(str): {"qty": int, "amount": str, "chat_id": int} }
+# pending_orders: { user_id(str): {"qty": int, "amount": Decimal, "chat_id": int} }
 # processed_txs:  [ txid, ... ]
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
@@ -122,7 +130,7 @@ def _load_state():
             try:
                 po[str(uid)] = {
                     "qty": int(v["qty"]),
-                    "amount": Decimal(str(v["amount"])).quantize(Decimal("0.01")),
+                    "amount": _dec(v["amount"]),
                     "chat_id": int(v["chat_id"]),
                 }
             except Exception:
@@ -141,13 +149,18 @@ _load_state()
 # ─────────────────────────────────────────────
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
-        [InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice")],
-    ])
-
-def back_only_kb():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
+        [
+            InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
+            InlineKeyboardButton("텔프유령인원", callback_data="menu:telf_ghost"),
+        ],
+        [
+            InlineKeyboardButton("조회수", callback_data="menu:views"),
+            InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
+        ],
+        [
+            InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
+            InlineKeyboardButton("문의하기", url="https://t.me/ghostsalesbot1"),
+        ],
     ])
 
 # ─────────────────────────────────────────────
@@ -242,6 +255,15 @@ def _to_decimal_amount(raw, token_decimals: int):
     except InvalidOperation:
         return None
 
+# ★ 변경: 운영자 안전모드용 — 가까운 주문 후보 찾기
+def _nearest_pending(amount: Decimal, top_k=3):
+    diffs = []
+    for uid, order in pending_orders.items():
+        exp = order["amount"]
+        diffs.append((abs(amount - exp), uid, order))
+    diffs.sort(key=lambda x: x[0])
+    return diffs[:top_k]
+
 async def check_tron_payments(app):
     params = {"sort": "-timestamp", "limit": "50", "start": "0", "address": PAYMENT_ADDRESS}
 
@@ -295,16 +317,17 @@ async def check_tron_payments(app):
                                 continue
 
                             matched = False
-                            # 주문 매칭
+                            # 주문 매칭 (★ 변경: 허용오차 ±AMOUNT_TOLERANCE 사용)
                             for uid, order in list(pending_orders.items()):
                                 expected: Decimal = order["amount"]
                                 diff = (amount - expected)
-                                if abs(diff) <= Decimal("0.001"):
+                                if abs(diff) <= AMOUNT_TOLERANCE:
                                     matched = True
                                     chat_id = order["chat_id"]
                                     qty = order["qty"]
 
-                                    log.info("[MATCH] tx=%s uid=%s amount=%s qty=%s", txid, uid, amount, qty)
+                                    log.info("[MATCH] tx=%s uid=%s amount=%s expected=%s tol=±%s",
+                                             txid, uid, amount, expected, AMOUNT_TOLERANCE)
 
                                     # 고객 알림
                                     try:
@@ -331,7 +354,7 @@ async def check_tron_payments(app):
                                                     f"- TXID: `{txid}`\n"
                                                     f"- From: `{from_addr}`\n"
                                                     f"- To  : `{to_addr}`\n"
-                                                    f"- 금액: {amount:.6f} USDT\n"
+                                                    f"- 금액: {amount:.6f} USDT (허용오차 ±{AMOUNT_TOLERANCE})\n"
                                                     f"- 주문자(UserID): {uid}\n"
                                                     f"- 수량: {qty:,}"
                                                 ),
@@ -346,22 +369,33 @@ async def check_tron_payments(app):
                                     _save_state()
                                     break
                                 else:
-                                    log.debug("[MISS] id=%s uid=%s tx=%s expected=%s diff=%s",
-                                              txid, uid, amount, expected, diff)
+                                    log.debug("[MISS] id=%s uid=%s tx=%s expected=%s diff=%s tol=±%s",
+                                              txid, uid, amount, expected, diff, AMOUNT_TOLERANCE)
 
-                            # 매칭 실패 → 운영자 세이프가드 알림 (미지정 주문 입금)
+                            # 매칭 실패 → 운영자 세이프가드 알림 (미지정/불일치 입금)
                             if not matched:
                                 log.debug("[UNMATCHED] id=%s amount=%s (orders=%s)", txid, amount, len(pending_orders))
                                 if ADMIN_CHAT_ID:
+                                    # ★ 변경: 가까운 주문 후보 힌트 포함
+                                    hint = ""
+                                    near = _nearest_pending(amount, 3)
+                                    if near:
+                                        lines = []
+                                        for d, uid2, ord2 in near:
+                                            lines.append(f"• uid={uid2}, 예상금액={ord2['amount']}, 차이={d}")
+                                        hint = "\n가까운 주문 후보:\n" + "\n".join(lines)
+
                                     try:
                                         await app.bot.send_message(
                                             chat_id=ADMIN_CHAT_ID,
                                             text=(
-                                                "🟡 [미지정 주문 입금 감지]\n"
+                                                "🟡 [미지정/불일치 입금 감지]\n"
                                                 f"- TXID: `{txid}`\n"
+                                                f"- From: `{from_addr}`\n"
                                                 f"- To  : `{to_addr}`\n"
                                                 f"- 금액: {amount:.6f} USDT\n"
-                                                "※ pending 주문이 없어 자동 매칭 실패. 수동 확인 필요."
+                                                f"- Pending 주문 수: {len(pending_orders)}\n"
+                                                "※ 자동 매칭 실패. 수동 확인 필요." + hint
                                             ),
                                             parse_mode="Markdown"
                                         )
@@ -385,7 +419,8 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 async def on_startup(app):
     asyncio.create_task(check_tron_payments(app))
-    log.info("🔄 TRC20 결제 확인 태스크 시작: addr=%s contract=%s", PAYMENT_ADDRESS, USDT_CONTRACT)
+    log.info("🔄 TRC20 결제 확인 태스크 시작: addr=%s contract=%s tol=±%s",
+             PAYMENT_ADDRESS, USDT_CONTRACT, AMOUNT_TOLERANCE)
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
