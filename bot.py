@@ -292,41 +292,42 @@ async def check_tron_payments(app):
                         continue
 
                     data = await resp.json()
-                txs = data.get("token_transfers", []) or []
+                                txs = data.get("token_transfers", []) or []
                 log.debug("[FETCH] txs=%s", len(txs))
 
                 if not txs:
                     await asyncio.sleep(10)
                     continue
 
-for tx in txs:   # line 302
-    try:   # ← 반드시 들여쓰기 4칸
-        txid = tx.get("transaction_id") or tx.get("hash")
-        contract = (tx.get("contract_address") or "").strip()
-        to_addr = (tx.get("to_address") or "").strip()
-        from_addr = (tx.get("from_address") or "").strip()
-        token_decimals = int(tx.get("tokenDecimal", 6))
+                for tx in txs:   # ← 반드시 while/async 안쪽으로 8칸 들여쓰기
+                    try:
+                        txid = tx.get("transaction_id") or tx.get("hash")
+                        contract = (tx.get("contract_address") or "").strip()
+                        to_addr = (tx.get("to_address") or "").strip()
+                        from_addr = (tx.get("from_address") or "").strip()
+                        token_decimals = int(tx.get("tokenDecimal", 6))
 
-        raw = _extract_amount(tx)
-        amount = _to_decimal_amount(raw, token_decimals)
+                        raw = _extract_amount(tx)
+                        amount = _to_decimal_amount(raw, token_decimals)
 
-        log.debug(
-            "[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
-            txid, contract, to_addr, raw, amount
-        )
+                        log.debug(
+                            "[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
+                            txid, contract, to_addr, raw, amount
+                        )
 
-        if not txid:
-            continue
-        if txid in processed_txs:
-            log.debug("[SKIP_DUP] %s", txid)
-            continue
-        if amount is None:
-            log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
-            continue
+                        if not txid:
+                            continue
+                        if txid in processed_txs:
+                            log.debug("[SKIP_DUP] %s", txid)
+                            continue
+                        if amount is None:
+                            log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
+                            continue
 
-    except Exception as e:   # ← try와 같은 레벨
-        log.error("[ERROR] tx parse failed: %s", e)
-        continue
+                    except Exception as e:   # ← try와 같은 들여쓰기
+                        log.error("[ERROR] tx parse failed: %s", e)
+                        continue
+
 # ─────────────────────────────────────────────
 # 핸들러
 # ─────────────────────────────────────────────
