@@ -340,7 +340,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             NOTICE_TEXT,
             reply_markup=main_menu_kb()
-        )
+        )   # ← 닫는 괄호 추가!
+
     elif query.data == "menu:ghost":
         await query.edit_message_text(
             "👻 유령인원 메뉴입니다.\n결제를 진행해주세요.",
