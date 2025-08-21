@@ -334,64 +334,6 @@ async def check_tron_payments(app):
 
             await asyncio.sleep(5)
 
-
-# ─────────────────────────────────────────────
-# 핸들러
-# ─────────────────────────────────────────────
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        WELCOME_TEXT,
-        reply_markup=main_menu_kb()
-    )
-
-async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "menu:notice":
-        await query.edit_message_text(
-            NOTICE_TEXT,
-            reply_markup=main_menu_kb()
-        )   # ← 닫는 괄호 추가!
-
-    elif query.data == "menu:ghost":
-        await query.edit_message_text(
-            "👻 유령인원 메뉴입니다.\n결제를 진행해주세요.",
-            reply_markup=main_menu_kb()
-        )
-    elif query.data == "menu:telf_ghost":
-        await query.edit_message_text(
-            "📞 텔프 유령인원 메뉴입니다.\n결제를 진행해주세요.",
-            reply_markup=main_menu_kb()
-        )
-    elif query.data == "menu:views":
-        await query.edit_message_text(
-            "👀 조회수 메뉴입니다.\n결제를 진행해주세요.",
-            reply_markup=main_menu_kb()
-        )
-    elif query.data == "menu:reactions":
-        await query.edit_message_text(
-            "❤️ 게시글 반응 메뉴입니다.\n결제를 진행해주세요.",
-            reply_markup=main_menu_kb()
-        )
-    else:
-        await query.edit_message_text(
-            "메뉴로 돌아갑니다.",
-            reply_markup=main_menu_kb()
-        )
-
-# ─────────────────────────────────────────────
-# 결제 (임시 예시 로직)
-# ─────────────────────────────────────────────
-# 실제 결제 API 연동 대신, 결제 시뮬레이션용 예시 코드
-# 추후 API 키/결제처 연동 가능
-
-async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "💳 결제창이 열렸습니다.\n15분 내 결제를 완료해주세요.",
-        reply_markup=main_menu_kb()
-    )
-
 # ─────────────────────────────────────────────
 # 메인 실행부
 # ─────────────────────────────────────────────
