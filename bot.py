@@ -353,9 +353,6 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
 
-    # 결제 관련 테스트 명령어
-    app.add_handler(CommandHandler("pay", payment_handler))
-
     print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
 
