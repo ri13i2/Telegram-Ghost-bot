@@ -299,8 +299,8 @@ async def check_tron_payments(app):
                     await asyncio.sleep(10)
                     continue
 
-                for tx in txs:
-    try:
+for tx in txs:   # line 302
+    try:   # ← 반드시 들여쓰기 4칸
         txid = tx.get("transaction_id") or tx.get("hash")
         contract = (tx.get("contract_address") or "").strip()
         to_addr = (tx.get("to_address") or "").strip()
@@ -324,7 +324,7 @@ async def check_tron_payments(app):
             log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
             continue
 
-    except Exception as e:   # ← ✅ for/try 안에 맞춰 들여쓰기
+    except Exception as e:   # ← try와 같은 레벨
         log.error("[ERROR] tx parse failed: %s", e)
         continue
 # ─────────────────────────────────────────────
