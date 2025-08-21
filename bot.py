@@ -292,14 +292,14 @@ async def check_tron_payments(app):
                         continue
 
                     data = await resp.json()
-                    txs = data.get("token_transfers", []) or []
-                    log.debug("[FETCH] txs=%s", len(txs))
+                txs = data.get("token_transfers", []) or []
+                log.debug("[FETCH] txs=%s", len(txs))
 
-                    if not txs:
-                        await asyncio.sleep(10)
-                        continue
+                if not txs:
+                    await asyncio.sleep(10)
+                    continue
 
-                                    for tx in txs:
+                for tx in txs:   # ✅ 이 부분이 session 블록과 같은 들여쓰기 레벨
                     try:
                         txid = tx.get("transaction_id") or tx.get("hash")
                         contract = (tx.get("contract_address") or "").strip()
@@ -307,12 +307,13 @@ async def check_tron_payments(app):
                         from_addr = (tx.get("from_address") or "").strip()
                         token_decimals = int(tx.get("tokenDecimal", 6))
 
-                        # ✅ 수정된 부분
                         raw = _extract_amount(tx)
                         amount = _to_decimal_amount(raw, token_decimals)
 
-                        log.debug("[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
-                                  txid, contract, to_addr, raw, amount)
+                        log.debug(
+                            "[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
+                            txid, contract, to_addr, raw, amount
+                        )
 
                         if not txid:
                             continue
