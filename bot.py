@@ -1,9 +1,10 @@
 # bot.py — USDT(TRC20) 자동결제 확인 + 고객/운영자 알림
-# (텍스트 수량 입력 / 뒤로가기만 유지, 디버깅 로그 강화판)
+# (텍스트 수량 입력 / 뒤로가기만, 주문 영구 저장 + 미지정 입금 알림 + 디버깅 강화판)
 
 import os
 import asyncio
 import logging
+import json
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from dotenv import load_dotenv
@@ -17,7 +18,10 @@ import aiohttp
 # ─────────────────────────────────────────────
 # 환경 변수 로드
 # ─────────────────────────────────────────────
-load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
+BASE_DIR = Path(__file__).resolve().parent
+STATE_FILE = BASE_DIR / "pending_state.json"
+
+load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TOKEN") or os.getenv("TELEGRAM_TOKEN")
 if not BOT_TOKEN:
@@ -68,20 +72,69 @@ WELCOME_TEXT = (
 
 NOTICE_TEXT = (
     " 유령 자판기 이용법 🚩\n"
-    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n"
-    "• 유령 인입 완료 전까지 그룹/채널 설정 금지\n"
-    "• 작업 완료 시간: 약 10~20분\n"
-    "• 1개의 주소만 진행 가능\n"
-    "• 결제창 제한 15분 경과 시 최초부터 재결제 필요\n"
-    "• 위반으로 발생하는 불상사는 책임지지 않습니다.\n"
+    "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+    "• 버튼 반응 없을시 → 메뉴로 돌아가기 클릭 필수\n\n"
+    "• 유령 인입 과정이 완료되기까지 그룹/채널 설정 금지\n"
+    "• 작업 완료 시간은 약 10~20분 소요\n"
+    "• 1개의 주소만 진행 가능합니다.\n"
+    "• 결제창 제한시간은 15분이며, 경과 시 처음부터 다시 결제 필요\n\n"
+    "• 자판기 이용법을 위반하여 발생하는 불상사는 책임지지 않습니다.\n\n"
+    "자판기 운영 취지:\n"
+    "① 잦은 계정 터짐 방지\n"
+    "② 본인 계정 노출 방지 (안전)\n"
+    "봇/대량 구매시 문의 바랍니다.\n"
+    "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
 # ─────────────────────────────────────────────
-# 간단 저장소
-# {user_id: {"qty": int, "amount": Decimal, "chat_id": int}}
+# 상태 저장 (주문/처리TX) — 파일 영구화
 # ─────────────────────────────────────────────
-pending_orders = {}
-processed_txs = set()  # 중복 처리 방지
+# pending_orders: { user_id(str): {"qty": int, "amount": str, "chat_id": int} }
+# processed_txs:  [ txid, ... ]
+pending_orders: dict[str, dict] = {}
+processed_txs: set[str] = set()
+
+def _save_state():
+    try:
+        data = {
+            "pending_orders": {
+                str(uid): {
+                    "qty": v["qty"],
+                    "amount": str(v["amount"]),  # Decimal -> str
+                    "chat_id": v["chat_id"],
+                } for uid, v in pending_orders.items()
+            },
+            "processed_txs": list(processed_txs)[-2000:],  # 최대 2000개 유지
+        }
+        STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        log.debug("[STATE] saved pending=%s processed=%s", len(pending_orders), len(processed_txs))
+    except Exception as e:
+        log.error("[STATE_SAVE_ERROR] %s", e)
+
+def _load_state():
+    global pending_orders, processed_txs
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        po = {}
+        for uid, v in (data.get("pending_orders") or {}).items():
+            try:
+                po[str(uid)] = {
+                    "qty": int(v["qty"]),
+                    "amount": Decimal(str(v["amount"])).quantize(Decimal("0.01")),
+                    "chat_id": int(v["chat_id"]),
+                }
+            except Exception:
+                continue
+        pending_orders = po
+        processed_txs = set(data.get("processed_txs") or [])
+        log.info("[STATE] loaded pending=%s processed=%s", len(pending_orders), len(processed_txs))
+    except Exception as e:
+        log.error("[STATE_LOAD_ERROR] %s", e)
+
+# 최초 로드
+_load_state()
 
 # ─────────────────────────────────────────────
 # 키보드
@@ -130,6 +183,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer("준비 중입니다.", show_alert=True)
 
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 유령 수량 텍스트 입력만 처리
     if not context.user_data.get("awaiting_qty"):
         return
 
@@ -143,6 +197,7 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
         return
 
+    # 상태 업데이트
     context.user_data["awaiting_qty"] = False
     context.user_data["ghost_qty"] = qty
 
@@ -150,9 +205,10 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     context.user_data["ghost_amount"] = amount
 
-    user_id = update.effective_user.id
+    user_id = str(update.effective_user.id)
     chat_id = update.effective_chat.id
     pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
+    _save_state()
 
     log.info("[ORDER] uid=%s qty=%s amount=%s chat_id=%s pending=%s",
              user_id, qty, amount, chat_id, len(pending_orders))
@@ -192,7 +248,6 @@ async def check_tron_payments(app):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                # 대기 건수/처리건수 체크
                 log.debug("[LOOP] pending=%s processed=%s", len(pending_orders), len(processed_txs))
 
                 async with session.get(TRONSCAN_URL, params=params, headers=HEADERS, timeout=30) as resp:
@@ -205,7 +260,7 @@ async def check_tron_payments(app):
                     txs = data.get("token_transfers", []) or []
                     log.debug("[FETCH] txs=%s", len(txs))
 
-                    if not pending_orders:
+                    if not txs:
                         await asyncio.sleep(10)
                         continue
 
@@ -222,16 +277,16 @@ async def check_tron_payments(app):
                             log.debug("[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
                                       txid, contract, to_addr, raw, amount)
 
-                            if not txid or txid in processed_txs:
-                                if txid:
-                                    log.debug("[SKIP_DUP] %s", txid)
+                            if not txid:
                                 continue
-
+                            if txid in processed_txs:
+                                log.debug("[SKIP_DUP] %s", txid)
+                                continue
                             if amount is None:
                                 log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
                                 continue
 
-                            # 필터: 컨트랙트 & 수취주소 일치
+                            # 필터: 컨트랙트 & 수취주소 일치 (심볼체크는 생략)
                             if contract != USDT_CONTRACT:
                                 log.debug("[SKIP_CONTRACT] id=%s api=%s env=%s", txid, contract, USDT_CONTRACT)
                                 continue
@@ -240,6 +295,7 @@ async def check_tron_payments(app):
                                 continue
 
                             matched = False
+                            # 주문 매칭
                             for uid, order in list(pending_orders.items()):
                                 expected: Decimal = order["amount"]
                                 diff = (amount - expected)
@@ -287,13 +343,34 @@ async def check_tron_payments(app):
 
                                     processed_txs.add(txid)
                                     del pending_orders[uid]
+                                    _save_state()
                                     break
                                 else:
                                     log.debug("[MISS] id=%s uid=%s tx=%s expected=%s diff=%s",
                                               txid, uid, amount, expected, diff)
 
+                            # 매칭 실패 → 운영자 세이프가드 알림 (미지정 주문 입금)
                             if not matched:
                                 log.debug("[UNMATCHED] id=%s amount=%s (orders=%s)", txid, amount, len(pending_orders))
+                                if ADMIN_CHAT_ID:
+                                    try:
+                                        await app.bot.send_message(
+                                            chat_id=ADMIN_CHAT_ID,
+                                            text=(
+                                                "🟡 [미지정 주문 입금 감지]\n"
+                                                f"- TXID: `{txid}`\n"
+                                                f"- To  : `{to_addr}`\n"
+                                                f"- 금액: {amount:.6f} USDT\n"
+                                                "※ pending 주문이 없어 자동 매칭 실패. 수동 확인 필요."
+                                            ),
+                                            parse_mode="Markdown"
+                                        )
+                                        log.info("[NOTIFY_ADMIN_UNMATCHED_OK] tx=%s", txid)
+                                    except Exception as ee:
+                                        log.error("[NOTIFY_ADMIN_UNMATCHED_FAIL] tx=%s err=%s", txid, ee)
+
+                                processed_txs.add(txid)
+                                _save_state()
 
                         except Exception as tx_err:
                             log.exception("[TX_ERROR] %s", tx_err)
