@@ -335,7 +335,7 @@ async def check_tron_payments(app):
                                                 "✅ 결제가 확인되었습니다!\n"
                                                 f"- 금액: {amount:.2f} USDT\n"
                                                 f"- 주문 수량: {qty:,}\n\n"
-                                                "📨 전달 받을 정보를 회신해주세요. (이메일/링크 등)"
+                                                "📨 전달 받을 주소를 입력해주세요. (그룹/채널 등)"
                                             )
                                         )
                                         log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", uid, chat_id)
