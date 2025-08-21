@@ -247,11 +247,15 @@ def _to_decimal_amount(raw, token_decimals: int):
         return None
     try:
         s = str(raw)
+        if s.startswith("0x"):  # ✅ HEX 문자열 처리
+            val = int(s, 16)
+            return (Decimal(val) / (Decimal(10) ** token_decimals)).quantize(Decimal("0.000000"))
         if s.isdigit():  # amountUInt64 같은 정수형
             return (Decimal(s) / (Decimal(10) ** token_decimals)).quantize(Decimal("0.000000"))
-        return Decimal(s)
-    except InvalidOperation:
+        return Decimal(s)  # 일반 소수 문자열
+    except (InvalidOperation, ValueError):
         return None
+
 
 # ★ 변경: 운영자 안전모드용 — 가까운 주문 후보 찾기
 def _nearest_pending(amount: Decimal, top_k=3):
