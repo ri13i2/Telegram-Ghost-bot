@@ -237,10 +237,11 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ─────────────────────────────────────────────
-# TRC20 USDT 전송 확인 (간편/안전)
+# TRC20 USDT 전송 확인 + 주문 매칭 & 알림
 # ─────────────────────────────────────────────
 TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)"}
+
 
 def _to_decimal_amount(raw, token_decimals: int):
     if raw is None:
@@ -256,8 +257,9 @@ def _to_decimal_amount(raw, token_decimals: int):
     except (InvalidOperation, ValueError):
         return None
 
-# ✅ 추가: 다양한 필드에서 안전하게 amount_raw 추출
+
 def _extract_amount(tx: dict):
+    """여러 케이스에서 안전하게 amount_raw 추출"""
     return (
         tx.get("amount")
         or tx.get("amount_str")
@@ -268,14 +270,16 @@ def _extract_amount(tx: dict):
         or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("amount")
     )
 
-# ★ 변경: 운영자 안전모드용 — 가까운 주문 후보 찾기
+
 def _nearest_pending(amount: Decimal, top_k=3):
+    """운영자 안전모드용 — 결제금액과 가장 가까운 주문 후보 찾기"""
     diffs = []
     for uid, order in pending_orders.items():
         exp = order["amount"]
         diffs.append((abs(amount - exp), uid, order))
     diffs.sort(key=lambda x: x[0])
     return diffs[:top_k]
+
 
 async def check_tron_payments(app):
     params = {"sort": "-timestamp", "limit": "50", "start": "0", "address": PAYMENT_ADDRESS}
@@ -292,7 +296,6 @@ async def check_tron_payments(app):
                         continue
 
                     data = await resp.json()
-                    # ✅ 들여쓰기 유지해야 함
                     txs = data.get("token_transfers", []) or []
                     log.debug("[FETCH] txs=%s", len(txs))
 
@@ -300,10 +303,9 @@ async def check_tron_payments(app):
                         await asyncio.sleep(10)
                         continue
 
-                    for tx in txs:   # ← while/async 안쪽으로 12칸 들여쓰기
+                    for tx in txs:
                         try:
                             txid = tx.get("transaction_id") or tx.get("hash")
-                            contract = (tx.get("contract_address") or "").strip()
                             to_addr = (tx.get("to_address") or "").strip()
                             from_addr = (tx.get("from_address") or "").strip()
                             token_decimals = int(tx.get("tokenDecimal", 6))
@@ -311,19 +313,80 @@ async def check_tron_payments(app):
                             raw = _extract_amount(tx)
                             amount = _to_decimal_amount(raw, token_decimals)
 
-                            log.debug(
-                                "[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
-                                txid, contract, to_addr, raw, amount
-                            )
+                            log.debug("[TX] id=%s to=%s raw=%s -> %s", txid, to_addr, raw, amount)
 
                             if not txid:
                                 continue
                             if txid in processed_txs:
-                                log.debug("[SKIP_DUP] %s", txid)
                                 continue
                             if amount is None:
-                                log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
                                 continue
+                            if to_addr.lower() != PAYMENT_ADDRESS.lower():
+                                continue
+
+                            # 주문 매칭
+                            matched_uid = None
+                            for uid, order in list(pending_orders.items()):
+                                if abs(order["amount"] - amount) < Decimal("0.000001"):  # 금액 정확히 일치
+                                    matched_uid = uid
+                                    break
+
+                            if matched_uid:
+                                order = pending_orders.pop(matched_uid)
+                                chat_id = order["chat_id"]
+                                qty = order["qty"]
+
+                                # 고객 알림
+                                try:
+                                    await app.bot.send_message(
+                                        chat_id=chat_id,
+                                        text=(
+                                            "✅ 결제가 확인되었습니다!\n"
+                                            f"- 금액: {amount:.2f} USDT\n"
+                                            f"- 주문 수량: {qty:,}\n\n"
+                                            "📨 전달 주소를 전달해주세요. (그룹방/채널 등)"
+                                        )
+                                    )
+                                    log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", matched_uid, chat_id)
+                                except Exception as ee:
+                                    log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", matched_uid, ee)
+
+                                # 운영자 알림
+                                if ADMIN_CHAT_ID:
+                                    try:
+                                        await app.bot.send_message(
+                                            chat_id=ADMIN_CHAT_ID,
+                                            text=(
+                                                "🟢 [결제 확인]\n"
+                                                f"- TXID: `{txid}`\n"
+                                                f"- From: `{from_addr}`\n"
+                                                f"- To  : `{to_addr}`\n"
+                                                f"- 금액: {amount:.6f} USDT\n"
+                                                f"- 주문자(UserID): {matched_uid}\n"
+                                                f"- 수량: {qty:,}"
+                                            ),
+                                            parse_mode="Markdown"
+                                        )
+                                    except Exception as ee:
+                                        log.error("[NOTIFY_ADMIN_FAIL] uid=%s err=%s", matched_uid, ee)
+
+                                processed_txs.add(txid)
+                                _save_state()
+                            else:
+                                # 매칭 실패 → 운영자에게 후보 보여주기
+                                if ADMIN_CHAT_ID:
+                                    nearest = _nearest_pending(amount)
+                                    msg = (
+                                        "⚠️ [미매칭 결제 감지]\n"
+                                        f"- TXID: `{txid}`\n"
+                                        f"- From: `{from_addr}`\n"
+                                        f"- To  : `{to_addr}`\n"
+                                        f"- 금액: {amount:.6f} USDT\n"
+                                        f"- 후보 주문: {nearest}"
+                                    )
+                                    await app.bot.send_message(ADMIN_CHAT_ID, msg, parse_mode="Markdown")
+
+                                processed_txs.add(txid)
 
                         except Exception as e:
                             log.error("[ERROR] tx parse failed: %s", e)
