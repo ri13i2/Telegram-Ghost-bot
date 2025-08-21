@@ -401,8 +401,15 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 # 메인 실행부
 # ─────────────────────────────────────────────
+async def on_startup(app):
+    # 결제체커 루프 실행
+    app.create_task(check_tron_payments(app))
+
 def main():
+    import os
+    from dotenv import load_dotenv
     load_dotenv()
+
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
         print("❌ BOT_TOKEN이 .env에 설정되지 않았습니다.")
@@ -410,16 +417,16 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # 핸들러 등록
+    # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
-    async def on_startup(app):
-        app.create_task(check_tron_payments(app))
+    # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
+    app.post_init = on_startup  
 
     print("✅ 유령 자판기 봇 실행 중...")
-    app.run_polling(on_startup=on_startup)
+    app.run_polling()
 
 # ─────────────────────────────────────────────
 # 실행
