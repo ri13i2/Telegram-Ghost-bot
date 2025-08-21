@@ -327,7 +327,7 @@ async def check_tron_payments(app):
                             # 주문 매칭
                             matched_uid = None
                             for uid, order in list(pending_orders.items()):
-                                if abs(order["amount"] - amount) < Decimal("0.000001"):  # 금액 정확히 일치
+                                if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
                                     break
 
@@ -376,13 +376,14 @@ async def check_tron_payments(app):
                                 # 매칭 실패 → 운영자에게 후보 보여주기
                                 if ADMIN_CHAT_ID:
                                     nearest = _nearest_pending(amount)
+                                    cand = "\n".join([f"• UID={uid} 기대금액={order['amount']}" for _, uid, order in nearest])
                                     msg = (
-                                        "⚠️ [미매칭 결제 감지]\n"
+                                        f"⚠️ [미매칭 결제 감지]\n"
                                         f"- TXID: `{txid}`\n"
                                         f"- From: `{from_addr}`\n"
                                         f"- To  : `{to_addr}`\n"
-                                        f"- 금액: {amount:.6f} USDT\n"
-                                        f"- 후보 주문: {nearest}"
+                                        f"- 금액: {amount:.6f} USDT\n\n"
+                                        f"📌 후보 주문:\n{cand if cand else '없음'}"
                                     )
                                     await app.bot.send_message(ADMIN_CHAT_ID, msg, parse_mode="Markdown")
 
@@ -401,10 +402,7 @@ async def check_tron_payments(app):
 # 메인 실행부
 # ─────────────────────────────────────────────
 def main():
-    import os
-    from dotenv import load_dotenv
     load_dotenv()
-
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
         print("❌ BOT_TOKEN이 .env에 설정되지 않았습니다.")
@@ -412,12 +410,16 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # 기본 핸들러
+    # 핸들러 등록
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+
+    async def on_startup(app):
+        app.create_task(check_tron_payments(app))
 
     print("✅ 유령 자판기 봇 실행 중...")
-    app.run_polling()
+    app.run_polling(on_startup=on_startup)
 
 # ─────────────────────────────────────────────
 # 실행
