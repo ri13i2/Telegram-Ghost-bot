@@ -256,6 +256,17 @@ def _to_decimal_amount(raw, token_decimals: int):
     except (InvalidOperation, ValueError):
         return None
 
+# ✅ 추가: 다양한 필드에서 안전하게 amount_raw 추출
+def _extract_amount(tx: dict):
+    return (
+        tx.get("amount")
+        or tx.get("amount_str")
+        or tx.get("amountUInt64")
+        or tx.get("quant")
+        or tx.get("value")
+        or tx.get("tokenValue")
+        or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("amount")
+    )
 
 # ★ 변경: 운영자 안전모드용 — 가까운 주문 후보 찾기
 def _nearest_pending(amount: Decimal, top_k=3):
@@ -295,7 +306,9 @@ async def check_tron_payments(app):
                             to_addr = (tx.get("to_address") or "").strip()
                             from_addr = (tx.get("from_address") or "").strip()
                             token_decimals = int(tx.get("tokenDecimal", 6))
-                            raw = tx.get("amount") or tx.get("amount_str") or tx.get("amountUInt64")
+
+                            # ✅ 수정된 부분
+                            raw = _extract_amount(tx)
                             amount = _to_decimal_amount(raw, token_decimals)
 
                             log.debug("[TX] id=%s contract=%s to=%s amount_raw=%s -> %s",
@@ -310,131 +323,89 @@ async def check_tron_payments(app):
                                 log.debug("[SKIP_NO_AMOUNT] id=%s", txid)
                                 continue
 
-                            # 필터: 컨트랙트 & 수취주소 일치 (심볼체크는 생략)
-                            if contract != USDT_CONTRACT:
-                                log.debug("[SKIP_CONTRACT] id=%s api=%s env=%s", txid, contract, USDT_CONTRACT)
-                                continue
-                            if to_addr != PAYMENT_ADDRESS:
-                                log.debug("[SKIP_TO_ADDR] id=%s api=%s env=%s", txid, to_addr, PAYMENT_ADDRESS)
-                                continue
+# ─────────────────────────────────────────────
+# 핸들러
+# ─────────────────────────────────────────────
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        WELCOME_TEXT,
+        reply_markup=main_menu_kb()
+    )
 
-                            matched = False
-                            # 주문 매칭 (★ 변경: 허용오차 ±AMOUNT_TOLERANCE 사용)
-                            for uid, order in list(pending_orders.items()):
-                                expected: Decimal = order["amount"]
-                                diff = (amount - expected)
-                                if abs(diff) <= AMOUNT_TOLERANCE:
-                                    matched = True
-                                    chat_id = order["chat_id"]
-                                    qty = order["qty"]
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-                                    log.info("[MATCH] tx=%s uid=%s amount=%s expected=%s tol=±%s",
-                                             txid, uid, amount, expected, AMOUNT_TOLERANCE)
-
-                                    # 고객 알림
-                                    try:
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text=(
-                                                "✅ 결제가 확인되었습니다!\n"
-                                                f"- 금액: {amount:.2f} USDT\n"
-                                                f"- 주문 수량: {qty:,}\n\n"
-                                                "📨 전달 받을 주소를 입력해주세요. (그룹/채널 등)"
-                                            )
-                                        )
-                                        log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", uid, chat_id)
-                                    except Exception as ee:
-                                        log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", uid, ee)
-
-                                    # 운영자 알림
-                                    if ADMIN_CHAT_ID:
-                                        try:
-                                            await app.bot.send_message(
-                                                chat_id=ADMIN_CHAT_ID,
-                                                text=(
-                                                    "🟢 [결제 확인]\n"
-                                                    f"- TXID: `{txid}`\n"
-                                                    f"- From: `{from_addr}`\n"
-                                                    f"- To  : `{to_addr}`\n"
-                                                    f"- 금액: {amount:.6f} USDT (허용오차 ±{AMOUNT_TOLERANCE})\n"
-                                                    f"- 주문자(UserID): {uid}\n"
-                                                    f"- 수량: {qty:,}"
-                                                ),
-                                                parse_mode="Markdown"
-                                            )
-                                            log.info("[NOTIFY_ADMIN_OK] uid=%s admin=%s", uid, ADMIN_CHAT_ID)
-                                        except Exception as ee:
-                                            log.error("[NOTIFY_ADMIN_FAIL] uid=%s err=%s", uid, ee)
-
-                                    processed_txs.add(txid)
-                                    del pending_orders[uid]
-                                    _save_state()
-                                    break
-                                else:
-                                    log.debug("[MISS] id=%s uid=%s tx=%s expected=%s diff=%s tol=±%s",
-                                              txid, uid, amount, expected, diff, AMOUNT_TOLERANCE)
-
-                            # 매칭 실패 → 운영자 세이프가드 알림 (미지정/불일치 입금)
-                            if not matched:
-                                log.debug("[UNMATCHED] id=%s amount=%s (orders=%s)", txid, amount, len(pending_orders))
-                                if ADMIN_CHAT_ID:
-                                    # ★ 변경: 가까운 주문 후보 힌트 포함
-                                    hint = ""
-                                    near = _nearest_pending(amount, 3)
-                                    if near:
-                                        lines = []
-                                        for d, uid2, ord2 in near:
-                                            lines.append(f"• uid={uid2}, 예상금액={ord2['amount']}, 차이={d}")
-                                        hint = "\n가까운 주문 후보:\n" + "\n".join(lines)
-
-                                    try:
-                                        await app.bot.send_message(
-                                            chat_id=ADMIN_CHAT_ID,
-                                            text=(
-                                                "🟡 [미지정/불일치 입금 감지]\n"
-                                                f"- TXID: `{txid}`\n"
-                                                f"- From: `{from_addr}`\n"
-                                                f"- To  : `{to_addr}`\n"
-                                                f"- 금액: {amount:.6f} USDT\n"
-                                                f"- Pending 주문 수: {len(pending_orders)}\n"
-                                                "※ 자동 매칭 실패. 수동 확인 필요." + hint
-                                            ),
-                                            parse_mode="Markdown"
-                                        )
-                                        log.info("[NOTIFY_ADMIN_UNMATCHED_OK] tx=%s", txid)
-                                    except Exception as ee:
-                                        log.error("[NOTIFY_ADMIN_UNMATCHED_FAIL] tx=%s err=%s", txid, ee)
-
-                                processed_txs.add(txid)
-                                _save_state()
-
-                        except Exception as tx_err:
-                            log.exception("[TX_ERROR] %s", tx_err)
-
-            except Exception as e:
-                log.exception("[LOOP_ERROR] %s", e)
-
-            await asyncio.sleep(10)
+    if query.data == "menu:notice":
+        await query.edit_message_text(
+            NOTICE_TEXT,
+            reply_markup=main_menu_kb()
+        )
+    elif query.data == "menu:ghost":
+        await query.edit_message_text(
+            "👻 유령인원 메뉴입니다.\n결제를 진행해주세요.",
+            reply_markup=main_menu_kb()
+        )
+    elif query.data == "menu:telf_ghost":
+        await query.edit_message_text(
+            "📞 텔프 유령인원 메뉴입니다.\n결제를 진행해주세요.",
+            reply_markup=main_menu_kb()
+        )
+    elif query.data == "menu:views":
+        await query.edit_message_text(
+            "👀 조회수 메뉴입니다.\n결제를 진행해주세요.",
+            reply_markup=main_menu_kb()
+        )
+    elif query.data == "menu:reactions":
+        await query.edit_message_text(
+            "❤️ 게시글 반응 메뉴입니다.\n결제를 진행해주세요.",
+            reply_markup=main_menu_kb()
+        )
+    else:
+        await query.edit_message_text(
+            "메뉴로 돌아갑니다.",
+            reply_markup=main_menu_kb()
+        )
 
 # ─────────────────────────────────────────────
-# 앱 구동
+# 결제 (임시 예시 로직)
 # ─────────────────────────────────────────────
-async def on_startup(app):
-    asyncio.create_task(check_tron_payments(app))
-    log.info("🔄 TRC20 결제 확인 태스크 시작: addr=%s contract=%s tol=±%s",
-             PAYMENT_ADDRESS, USDT_CONTRACT, AMOUNT_TOLERANCE)
+# 실제 결제 API 연동 대신, 결제 시뮬레이션용 예시 코드
+# 추후 API 키/결제처 연동 가능
 
+async def payment_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "💳 결제창이 열렸습니다.\n15분 내 결제를 완료해주세요.",
+        reply_markup=main_menu_kb()
+    )
+
+# ─────────────────────────────────────────────
+# 메인 실행부
+# ─────────────────────────────────────────────
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        print("❌ BOT_TOKEN이 .env에 설정되지 않았습니다.")
+        return
+
+    app = ApplicationBuilder().token(TOKEN).build()
+
+    # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
-    # 🔥 패턴 확장해서 메뉴 전체 버튼 대응
-    app.add_handler(CallbackQueryHandler(
-        menu_handler,
-        pattern=r"^(menu:ghost|menu:telf_ghost|menu:views|menu:reactions|menu:notice|back:main)$"
-    ))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
-    log.info("✅ 유령 자판기 실행중...")
+    app.add_handler(CallbackQueryHandler(menu_handler))
+
+    # 결제 관련 테스트 명령어
+    app.add_handler(CommandHandler("pay", payment_handler))
+
+    print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
 
+# ─────────────────────────────────────────────
+# 실행
+# ─────────────────────────────────────────────
 if __name__ == "__main__":
     main()
