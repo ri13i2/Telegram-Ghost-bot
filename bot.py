@@ -371,7 +371,8 @@ async def check_tron_payments(app):
                                                 f"- 금액: {amount:.6f} USDT\n"
                                                 f"- 주문자(UserID): {matched_uid}\n"
                                                 f"- 수량: {qty:,}\n"
-                                            )
+                                            ),
+                                            parse_mode="MarkdownV2",
                                         )
                                     except Exception as e:
                                         log.error("[ADMIN_NOTIFY_ERROR] %s", e)
@@ -432,7 +433,7 @@ async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─────────────────────────────────────────────
 async def on_startup(app):
     # 결제체커 루프 실행
-    app.create_task(check_tron_payments(app))
+    asyncio.create_task(check_tron_payments(app))
 
 def main():
     import os
