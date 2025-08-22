@@ -21,6 +21,9 @@ import aiohttp
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "pending_state.json"
 
+# 결제 완료된 사용자 저장소
+paid_users = set()
+
 load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TOKEN") or os.getenv("TELEGRAM_TOKEN")
@@ -330,6 +333,7 @@ async def check_tron_payments(app):
                             for uid, order in list(pending_orders.items()):
                                 if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
+                                    paid_users.add(matched_uid)
                                     break
 
                             if matched_uid:
@@ -402,32 +406,25 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 # 주소 핸들러 (결제 완료자만 가능)
 # ─────────────────────────────────────────────
-@dp.message_handler(filters.TEXT & ~filters.COMMAND)
+# 주소 입력 핸들러 (명령어가 아닌 일반 텍스트일 때만)
 async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = update.message.text.strip()
+    if context.user_data.get("awaiting_qty"):  
+        return  # 아직 수량 입력 단계면 무시
 
-    # URL 형태인지 확인 (텔레그램 초대 링크만 허용 예시)
-    if not (text.startswith("https://t.me/") or text.startswith("t.me/")):
-        return
-
-    if user_id in confirmed_users:  # ✅ 결제 완료된 사용자만
-        user_addresses[user_id] = text
-
-        # 사용자 확인 메세지
-        await update.message.reply_text("✅ 주소가 접수되었습니다. 감사합니다!")
-
-        # 운영자 알림
-        if ADMIN_CHAT_ID:
-            await context.bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
-                text=(f"📢 [주소 접수]\n"
-                      f"- UserID: {user_id}\n"
-                      f"- 주소: {text}")
-            )
-    else:
-        # ❌ 결제 안 된 사용자 → 에러 안내
-        await update.message.reply_text("❌ 결제가 확인된 후에만 주소를 등록할 수 있습니다.")
+    user_id = str(update.effective_user.id)
+    if user_id not in paid_users:
+        return  # 결제 안 된 유저는 무시
+    
+    user_channel_link = update.message.text.strip()
+    await context.bot.send_message(
+        chat_id=ADMIN_CHAT_ID,
+        text=(
+            "📩 [주소 전달]\n"
+            f"- 주문자: @{update.effective_user.username or 'N/A'} (ID: {user_id})\n"
+            f"- 전달 주소: {user_channel_link}"
+        )
+    )
+    await update.message.reply_text("✅ 주소가 정상적으로 접수되었습니다.")
 
 # ─────────────────────────────────────────────
 # 메인 실행부
@@ -451,7 +448,8 @@ def main():
     # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+    app.add_handler(MessageHandler(filters.Regex(r"^\d+$"), qty_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex(r"^\d+$"), handle_address))
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
     app.post_init = on_startup  
