@@ -203,72 +203,69 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await q.answer("준비 중입니다.", show_alert=True)
 
-# --- 수량 입력 핸들러 ---
-async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_qty"):
-        return
+# --- 단일 입력 핸들러 ---
+async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 1) 수량 입력 대기 상태일 때
+    if context.user_data.get("awaiting_qty"):
+        text = update.message.text.strip().replace(",", "")
+        if not text.isdigit():
+            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
+            return
 
-    text = update.message.text.strip().replace(",", "")
-    if not text.isdigit():
-        await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
-        return
+        qty = int(text)
+        if qty < 100 or qty % 100 != 0:
+            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
+            return
 
-    qty = int(text)
-    if qty < 100 or qty % 100 != 0:
-        await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
-        return
+        # 금액 계산
+        blocks = qty // 100
+        amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # 금액 계산
-    blocks = qty // 100
-    amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        # 상태 업데이트
+        context.user_data["awaiting_qty"] = False
+        context.user_data["awaiting_target"] = True
+        context.user_data["ghost_qty"] = qty
+        context.user_data["ghost_amount"] = amount
 
-    # 상태 저장
-    context.user_data["awaiting_qty"] = False
-    context.user_data["ghost_qty"] = qty
-    context.user_data["ghost_amount"] = amount
-    context.user_data["awaiting_target"] = True   # 👉 주소 대기 상태 ON
-
-    user_id = str(update.effective_user.id)
-    chat_id = update.effective_chat.id
-    pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
-    _save_state()
-
-    await update.message.reply_text(
-        f"✅ {qty:,}명 주문이 확인되었습니다.\n"
-        "다음 단계로, 인원을 투입할 그룹/채널 주소(@username 또는 초대링크)를 입력해주세요.",
-        reply_markup=back_only_kb()
-    )
-
-# --- 주소 입력 핸들러 ---
-async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 👉 주소 입력 모드가 아닐 때는 그냥 리턴
-    if not context.user_data.get("awaiting_target"):
-        return
-
-    target = update.message.text.strip()
-    context.user_data["awaiting_target"] = False
-    context.user_data["ghost_target"] = target
-
-    user_id = str(update.effective_user.id)
-    if user_id in pending_orders:
-        pending_orders[user_id]["target"] = target
+        user_id = str(update.effective_user.id)
+        chat_id = update.effective_chat.id
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
         _save_state()
 
-    qty = context.user_data["ghost_qty"]
-    amount = context.user_data["ghost_amount"]
+        await update.message.reply_text(
+            f"✅ {qty:,}명 주문이 확인되었습니다.\n"
+            "다음 단계로, 인원을 투입할 그룹/채널 주소(@username 또는 초대링크)를 입력해주세요.",
+            reply_markup=back_only_kb()
+        )
+        return
 
-    await update.message.reply_text(
-        "🧾 최종 주문 요약\n"
-        f"- 유령인원: {qty:,}명\n"
-        f"- 대상주소: {target}\n"
-        f"- 결제수단: USDT(TRC20)\n"
-        f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-        f"- 결제금액: {amount} USDT\n\n"
-        "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-        "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-        parse_mode="Markdown",
-        reply_markup=back_only_kb()
-    )
+    # 2) 주소 입력 대기 상태일 때
+    if context.user_data.get("awaiting_target"):
+        target = update.message.text.strip()
+        context.user_data["awaiting_target"] = False
+        context.user_data["ghost_target"] = target
+
+        user_id = str(update.effective_user.id)
+        if user_id in pending_orders:
+            pending_orders[user_id]["target"] = target
+            _save_state()
+
+        qty = context.user_data["ghost_qty"]
+        amount = context.user_data["ghost_amount"]
+
+        await update.message.reply_text(
+            "🧾 최종 주문 요약\n"
+            f"- 유령인원: {qty:,}명\n"
+            f"- 대상주소: {target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+            f"- 결제금액: {amount} USDT\n\n"
+            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+            parse_mode="Markdown",
+            reply_markup=back_only_kb()
+        )
+        return
 
 # ─────────────────────────────────────────────
 # TRC20 USDT 전송 확인 + 주문 매칭 & 알림
@@ -453,9 +450,7 @@ def main():
     # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
-    # ⚠️ 순서 중요: 먼저 qty_handler, 그다음 target_handler
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_input_handler))
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
     app.post_init = on_startup
