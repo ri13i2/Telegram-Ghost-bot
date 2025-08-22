@@ -218,13 +218,15 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
         return
 
-    context.user_data["awaiting_qty"] = False
-    context.user_data["awaiting_target"] = True  # ✅ 이제 주소 입력을 기다리도록 플래그 세팅
-    context.user_data["ghost_qty"] = qty
-
+    # 👉 금액 계산 먼저
     blocks = qty // 100
     amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # 👉 상태 저장
+    context.user_data["awaiting_qty"] = False
+    context.user_data["ghost_qty"] = qty
     context.user_data["ghost_amount"] = amount
+    context.user_data["awaiting_target"] = True   # 🔥 주소 입력 핸들러 활성화
 
     user_id = str(update.effective_user.id)
     chat_id = update.effective_chat.id
