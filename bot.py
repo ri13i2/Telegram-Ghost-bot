@@ -242,7 +242,7 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # 주소 입력 핸들러
 async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_qty"):
+    if not context.user_data.get("awaiting_target"):
         return
 
     target = update.message.text.strip()
@@ -453,8 +453,8 @@ def main():
     # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
     app.post_init = on_startup
