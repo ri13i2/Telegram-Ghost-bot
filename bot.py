@@ -15,7 +15,6 @@ from telegram.ext import (
 )
 import aiohttp
 
-
 # ─────────────────────────────────────────────
 # 환경 변수 로드
 # ─────────────────────────────────────────────
@@ -45,7 +44,6 @@ def _dec(v, q="0.01", default="0.00"):
     except Exception:
         return Decimal(default).quantize(Decimal(q))
 
-
 try:
     PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "7.21"))
 except InvalidOperation:
@@ -55,7 +53,6 @@ except InvalidOperation:
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
-
 
 # ─────────────────────────────────────────────
 # 로깅
@@ -72,7 +69,6 @@ log.info(
     masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT,
     PER_100_PRICE, AMOUNT_TOLERANCE, LOG_LEVEL
 )
-
 
 # ─────────────────────────────────────────────
 # 안내 텍스트
@@ -103,13 +99,11 @@ NOTICE_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
-
 # ─────────────────────────────────────────────
 # 상태 저장 (주문/처리TX) — 파일 영구화
 # ─────────────────────────────────────────────
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
-
 
 def _save_state():
     try:
@@ -130,7 +124,6 @@ def _save_state():
         log.debug("[STATE] saved pending=%s processed=%s", len(pending_orders), len(processed_txs))
     except Exception as e:
         log.error("[STATE_SAVE_ERROR] %s", e)
-
 
 def _load_state():
     global pending_orders, processed_txs
@@ -154,9 +147,7 @@ def _load_state():
     except Exception as e:
         log.error("[STATE_LOAD_ERROR] %s", e)
 
-
 _load_state()
-
 
 # ─────────────────────────────────────────────
 # 키보드
@@ -177,17 +168,14 @@ def main_menu_kb():
         ],
     ])
 
-
 def back_only_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ 메뉴로 돌아가기", callback_data="back:main")]])
-
 
 # ─────────────────────────────────────────────
 # 핸들러들
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME_TEXT, reply_markup=main_menu_kb())
-
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -214,7 +202,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await q.answer("준비 중입니다.", show_alert=True)
-
 
 # 수량 입력 핸들러
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -253,7 +240,6 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_only_kb()
     )
 
-
 # 주소 입력 핸들러
 async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("awaiting_qty"):
@@ -290,7 +276,6 @@ async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)"}
 
-
 def _to_decimal_amount(raw, token_decimals: int):
     if raw is None:
         return None
@@ -305,7 +290,6 @@ def _to_decimal_amount(raw, token_decimals: int):
     except (InvalidOperation, ValueError):
         return None
 
-
 def _extract_amount(tx: dict):
     """여러 케이스에서 안전하게 amount_raw 추출"""
     return (
@@ -318,7 +302,6 @@ def _extract_amount(tx: dict):
         or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("amount")
     )
 
-
 def _nearest_pending(amount: Decimal, top_k=3):
     """운영자 안전모드용 — 결제금액과 가장 가까운 주문 후보 찾기"""
     diffs = []
@@ -327,7 +310,6 @@ def _nearest_pending(amount: Decimal, top_k=3):
         diffs.append((abs(amount - exp), uid, order))
     diffs.sort(key=lambda x: x[0])
     return diffs[:top_k]
-
 
 async def check_tron_payments(app):
     params = {"sort": "-timestamp", "limit": "50", "start": "0", "address": PAYMENT_ADDRESS}
@@ -456,7 +438,6 @@ async def on_startup(app):
     # 결제체커 루프 실행
     app.create_task(check_tron_payments(app))
 
-
 def main():
     import os
     from dotenv import load_dotenv
@@ -480,7 +461,6 @@ def main():
 
     print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
-
 
 # ─────────────────────────────────────────────
 # 실행
