@@ -342,35 +342,35 @@ async def check_tron_payments(app):
                                 qty = order["qty"]
 
                                 # 고객 알림
-                                    try:
-                                        await app.bot.send_message(
-                                            chat_id=chat_id,
-                                            text=(
-                                                "✅ 결제가 확인되었습니다!\n"
-                                                f"- 금액: {amount:.2f} USDT\n"
-                                                f"- 주문 수량: {qty:,}\n\n"
-                                                "📨 전달 주소를 전달해주세요. (그룹방/채널 등)"
-                                            )
+                                try:
+                                    await app.bot.send_message(
+                                        chat_id=chat_id,
+                                        text=(
+                                            "✅ 결제가 확인되었습니다!\n"
+                                            f"- 금액: {amount:.2f} USDT\n"
+                                            f"- 주문 수량: {qty:,}\n\n"
+                                            "📨 전달 주소를 전달해주세요. (그룹방/채널 등)"
                                         )
-                                        log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", matched_uid, chat_id)
-                                    except Exception as ee:
-                                        log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", matched_uid, ee)
+                                    )
+                                    log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", matched_uid, chat_id)
+                                except Exception as ee:
+                                    log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", matched_uid, ee)
 
-                                 # 운영자 알림 (항상 실행)
-                                 if ADMIN_CHAT_ID:
-                                     try:
-                                         log.debug("[MATCH_OK] uid=%s amount=%s", matched_uid, amount)
+                                # 운영자 알림 (항상 실행)
+                                if ADMIN_CHAT_ID:
+                                    try:
+                                        log.debug("[MATCH_OK] uid=%s amount=%s", matched_uid, amount)
 
-                                         await app.bot.send_message(
-                                             chat_id=ADMIN_CHAT_ID,
-                                             text=(
-                                                 "🟢 [결제 확인]\n"
-                                                 f"- TXID: {txid}\n"
-                                                 f"- From: {from_addr}\n"
-                                                 f"- To  : {to_addr}\n"
-                                                 f"- 금액: {amount:.6f} USDT\n"
-                                                 f"- 주문자(UserID): {matched_uid}\n"
-                                                 f"- 수량: {qty:,}\n"
+                                        await app.bot.send_message(
+                                            chat_id=ADMIN_CHAT_ID,
+                                            text=(
+                                                "🟢 [결제 확인]\n"
+                                                f"- TXID: {txid}\n"
+                                                f"- From: {from_addr}\n"
+                                                f"- To  : {to_addr}\n"
+                                                f"- 금액: {amount:.6f} USDT\n"
+                                                f"- 주문자(UserID): {matched_uid}\n"
+                                                f"- 수량: {qty:,}\n"
                                             )
                                         )
                                     except Exception as e:
