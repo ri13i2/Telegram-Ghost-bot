@@ -402,28 +402,32 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 # 주소 핸들러 (결제 완료자만 가능)
 # ─────────────────────────────────────────────
-async def address_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    username = update.effective_user.username or "없음"
+@dp.message_handler(filters.TEXT & ~filters.COMMAND)
+async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     text = update.message.text.strip()
 
-    if user_id not in completed_orders:
-        await update.message.reply_text("❌ 결제 확인 후에만 주소를 입력할 수 있습니다.")
+    # URL 형태인지 확인 (텔레그램 초대 링크만 허용 예시)
+    if not (text.startswith("https://t.me/") or text.startswith("t.me/")):
         return
 
-    # 운영자 알림
-    if ADMIN_CHAT_ID:
-        await context.bot.send_message(
-            chat_id=ADMIN_CHAT_ID,
-            text=(
-                "📨 [주소 전달됨]\n"
-                f"- UserID: {user_id}\n"
-                f"- Username: @{username}\n"
-                f"- 주소: {text}"
-            )
-        )
+    if user_id in confirmed_users:  # ✅ 결제 완료된 사용자만
+        user_addresses[user_id] = text
 
-    await update.message.reply_text("✅ 주소가 접수되었습니다. 감사합니다!")
+        # 사용자 확인 메세지
+        await update.message.reply_text("✅ 주소가 접수되었습니다. 감사합니다!")
+
+        # 운영자 알림
+        if ADMIN_CHAT_ID:
+            await context.bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=(f"📢 [주소 접수]\n"
+                      f"- UserID: {user_id}\n"
+                      f"- 주소: {text}")
+            )
+    else:
+        # ❌ 결제 안 된 사용자 → 에러 안내
+        await update.message.reply_text("❌ 결제가 확인된 후에만 주소를 등록할 수 있습니다.")
 
 # ─────────────────────────────────────────────
 # 메인 실행부
