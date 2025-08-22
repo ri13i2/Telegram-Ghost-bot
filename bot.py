@@ -453,8 +453,10 @@ def main():
     # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
+    # ⚠️ 순서 중요: 먼저 qty_handler, 그다음 target_handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
+
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
     app.post_init = on_startup
