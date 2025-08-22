@@ -203,7 +203,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await q.answer("준비 중입니다.", show_alert=True)
 
-# 수량 입력 핸들러
+# --- 수량 입력 핸들러 ---
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_qty"):
         return
@@ -218,23 +218,20 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
         return
 
-    # 👉 금액 계산 먼저
+    # 금액 계산
     blocks = qty // 100
     amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # 👉 상태 저장
+    # 상태 저장
     context.user_data["awaiting_qty"] = False
     context.user_data["ghost_qty"] = qty
     context.user_data["ghost_amount"] = amount
-    context.user_data["awaiting_target"] = True   # 🔥 주소 입력 핸들러 활성화
+    context.user_data["awaiting_target"] = True   # 👉 주소 대기 상태 ON
 
     user_id = str(update.effective_user.id)
     chat_id = update.effective_chat.id
     pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
     _save_state()
-
-    log.info("[ORDER] uid=%s qty=%s amount=%s chat_id=%s pending=%s",
-             user_id, qty, amount, chat_id, len(pending_orders))
 
     await update.message.reply_text(
         f"✅ {qty:,}명 주문이 확인되었습니다.\n"
@@ -242,8 +239,9 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=back_only_kb()
     )
 
-# 주소 입력 핸들러
+# --- 주소 입력 핸들러 ---
 async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 👉 주소 입력 모드가 아닐 때는 그냥 리턴
     if not context.user_data.get("awaiting_target"):
         return
 
@@ -458,7 +456,6 @@ def main():
     # ⚠️ 순서 중요: 먼저 qty_handler, 그다음 target_handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
-
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
     app.post_init = on_startup
