@@ -15,14 +15,12 @@ from telegram.ext import (
 )
 import aiohttp
 
+
 # ─────────────────────────────────────────────
 # 환경 변수 로드
 # ─────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent
 STATE_FILE = BASE_DIR / "pending_state.json"
-
-# 결제 완료된 사용자 저장소
-paid_users = set()
 
 load_dotenv(dotenv_path=BASE_DIR / ".env", override=False)
 
@@ -39,6 +37,7 @@ ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0") or "0")
 # TRON USDT(TRC20) 공식 컨트랙트 (메인넷)
 USDT_CONTRACT = (os.getenv("USDT_CONTRACT") or "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t").strip()
 
+
 # ★ 변경: 안전한 Decimal 파서 + 허용오차 환경변수 지원
 def _dec(v, q="0.01", default="0.00"):
     try:
@@ -46,14 +45,17 @@ def _dec(v, q="0.01", default="0.00"):
     except Exception:
         return Decimal(default).quantize(Decimal(q))
 
+
 try:
     PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "7.21"))
 except InvalidOperation:
     PER_100_PRICE = _dec("7.21")
+
 # 허용오차(매칭) 기본값 0.01 USDT
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
+
 
 # ─────────────────────────────────────────────
 # 로깅
@@ -65,8 +67,12 @@ logging.basicConfig(
 log = logging.getLogger("paybot")
 
 masked_token = BOT_TOKEN[:10] + "..." if BOT_TOKEN else "N/A"
-log.info("🔧 CONFIG | token=%s admin=%s addr=%s contract=%s per100=%s tol=±%s log=%s",
-         masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT, PER_100_PRICE, AMOUNT_TOLERANCE, LOG_LEVEL)
+log.info(
+    "🔧 CONFIG | token=%s admin=%s addr=%s contract=%s per100=%s tol=±%s log=%s",
+    masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT,
+    PER_100_PRICE, AMOUNT_TOLERANCE, LOG_LEVEL
+)
+
 
 # ─────────────────────────────────────────────
 # 안내 텍스트
@@ -97,12 +103,13 @@ NOTICE_TEXT = (
     "➖➖➖➖➖➖➖➖➖➖➖➖➖"
 )
 
+
 # ─────────────────────────────────────────────
 # 상태 저장 (주문/처리TX) — 파일 영구화
 # ─────────────────────────────────────────────
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
-completed_orders: dict[str, dict] = {}   # ✅ 결제 완료자
+
 
 def _save_state():
     try:
@@ -112,14 +119,18 @@ def _save_state():
                     "qty": v["qty"],
                     "amount": str(v["amount"]),
                     "chat_id": v["chat_id"],
-                } for uid, v in pending_orders.items()
+                }
+                for uid, v in pending_orders.items()
             },
             "processed_txs": list(processed_txs)[-2000:],
         }
-        STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        STATE_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         log.debug("[STATE] saved pending=%s processed=%s", len(pending_orders), len(processed_txs))
     except Exception as e:
         log.error("[STATE_SAVE_ERROR] %s", e)
+
 
 def _load_state():
     global pending_orders, processed_txs
@@ -143,7 +154,9 @@ def _load_state():
     except Exception as e:
         log.error("[STATE_LOAD_ERROR] %s", e)
 
+
 _load_state()
+
 
 # ─────────────────────────────────────────────
 # 키보드
@@ -164,14 +177,17 @@ def main_menu_kb():
         ],
     ])
 
+
 def back_only_kb():
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ 메뉴로 돌아가기", callback_data="back:main")]])
+
 
 # ─────────────────────────────────────────────
 # 핸들러들
 # ─────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -199,6 +215,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await q.answer("준비 중입니다.", show_alert=True)
 
+
+# 수량 입력 핸들러
 async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.user_data.get("awaiting_qty"):
         return
@@ -214,6 +232,7 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     context.user_data["awaiting_qty"] = False
+    context.user_data["awaiting_target"] = True  # ✅ 이제 주소 입력을 기다리도록 플래그 세팅
     context.user_data["ghost_qty"] = qty
 
     blocks = qty // 100
@@ -229,8 +248,33 @@ async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
              user_id, qty, amount, chat_id, len(pending_orders))
 
     await update.message.reply_text(
-        "🧾 주문 요약\n"
+        f"✅ {qty:,}명 주문이 확인되었습니다.\n"
+        "다음 단계로, 인원을 투입할 그룹/채널 주소(@username 또는 초대링크)를 입력해주세요.",
+        reply_markup=back_only_kb()
+    )
+
+
+# 주소 입력 핸들러
+async def target_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get("awaiting_qty"):
+        return
+
+    target = update.message.text.strip()
+    context.user_data["awaiting_target"] = False
+    context.user_data["ghost_target"] = target
+
+    user_id = str(update.effective_user.id)
+    if user_id in pending_orders:
+        pending_orders[user_id]["target"] = target
+        _save_state()
+
+    qty = context.user_data["ghost_qty"]
+    amount = context.user_data["ghost_amount"]
+
+    await update.message.reply_text(
+        "🧾 최종 주문 요약\n"
         f"- 유령인원: {qty:,}명\n"
+        f"- 대상주소: {target}\n"
         f"- 결제수단: USDT(TRC20)\n"
         f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
         f"- 결제금액: {amount} USDT\n\n"
@@ -333,13 +377,14 @@ async def check_tron_payments(app):
                             for uid, order in list(pending_orders.items()):
                                 if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
-                                    paid_users.add(matched_uid)
                                     break
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
                                 chat_id = order["chat_id"]
                                 qty = order["qty"]
+                                addr = order.get("target", "❌ 주소 미입력")
+                                amount_expected = order["amount"]
 
                                 # 고객 알림
                                 try:
@@ -349,33 +394,32 @@ async def check_tron_payments(app):
                                             "✅ 결제가 확인되었습니다!\n"
                                             f"- 금액: {amount:.2f} USDT\n"
                                             f"- 주문 수량: {qty:,}\n\n"
-                                            "📨 전달 주소를 전달해주세요. (그룹방/채널 등)"
+                                            "15분 내로 인원이 들어갑니다."
                                         )
                                     )
                                     log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", matched_uid, chat_id)
                                 except Exception as ee:
                                     log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", matched_uid, ee)
 
-                                # 운영자 알림 (항상 실행)
+                                # 운영자 알림
                                 if ADMIN_CHAT_ID:
                                     try:
-                                        log.debug("[MATCH_OK] uid=%s amount=%s", matched_uid, amount)
-
+                                        user = await app.bot.get_chat(chat_id)
+                                        username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
                                         await app.bot.send_message(
                                             chat_id=ADMIN_CHAT_ID,
                                             text=(
                                                 "🟢 [결제 확인]\n"
-                                                f"- TXID: {txid}\n"
-                                                f"- From: {from_addr}\n"
-                                                f"- To  : {to_addr}\n"
-                                                f"- 금액: {amount:.6f} USDT\n"
-                                                f"- 주문자(UserID): {matched_uid}\n"
+                                                f"- 주문자: {username}\n"
                                                 f"- 수량: {qty:,}\n"
+                                                f"- 주소: {addr}\n"
+                                                f"- 금액: {amount_expected} USDT\n"
+                                                f"- TXID: {txid}"
                                             ),
-                                            parse_mode="MarkdownV2",
+                                            parse_mode="Markdown"
                                         )
-                                    except Exception as e:
-                                        log.error("[ADMIN_NOTIFY_ERROR] %s", e)
+                                    except Exception as ee:
+                                        log.error("[NOTIFY_ADMIN_FAIL] uid=%s err=%s", matched_uid, ee)
 
                                 processed_txs.add(txid)
                                 _save_state()
@@ -386,9 +430,9 @@ async def check_tron_payments(app):
                                     cand = "\n".join([f"• UID={uid} 기대금액={order['amount']}" for _, uid, order in nearest])
                                     msg = (
                                         f"⚠️ [미매칭 결제 감지]\n"
-                                        f"- TXID: `{txid}`\n"
-                                        f"- From: `{from_addr}`\n"
-                                        f"- To  : `{to_addr}`\n"
+                                        f"- TXID: {txid}\n"
+                                        f"- From: {from_addr}\n"
+                                        f"- To : {to_addr}\n"
                                         f"- 금액: {amount:.6f} USDT\n\n"
                                         f"📌 후보 주문:\n{cand if cand else '없음'}"
                                     )
@@ -406,34 +450,12 @@ async def check_tron_payments(app):
             await asyncio.sleep(5)
 
 # ─────────────────────────────────────────────
-# 주소 핸들러 (결제 완료자만 가능)
-# ─────────────────────────────────────────────
-# 주소 입력 핸들러 (명령어가 아닌 일반 텍스트일 때만)
-async def handle_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if context.user_data.get("awaiting_qty"):  
-        return  # 아직 수량 입력 단계면 무시
-
-    user_id = str(update.effective_user.id)
-    if user_id not in paid_users:
-        return  # 결제 안 된 유저는 무시
-    
-    user_channel_link = update.message.text.strip()
-    await context.bot.send_message(
-        chat_id=ADMIN_CHAT_ID,
-        text=(
-            "📩 [주소 전달]\n"
-            f"- 주문자: @{update.effective_user.username or 'N/A'} (ID: {user_id})\n"
-            f"- 전달 주소: {user_channel_link}"
-        )
-    )
-    await update.message.reply_text("✅ 주소가 정상적으로 접수되었습니다.")
-
-# ─────────────────────────────────────────────
 # 메인 실행부
 # ─────────────────────────────────────────────
 async def on_startup(app):
     # 결제체커 루프 실행
-    asyncio.create_task(check_tron_payments(app))
+    app.create_task(check_tron_payments(app))
+
 
 def main():
     import os
@@ -450,17 +472,17 @@ def main():
     # 기본 핸들러
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
-    app.add_handler(MessageHandler(filters.Regex(r"^\d+$"), qty_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex(r"^\d+$"), handle_address))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, target_handler))
 
     # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
-    app.post_init = on_startup  
+    app.post_init = on_startup
 
     print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
 
+
 # ─────────────────────────────────────────────
 # 실행
 # ─────────────────────────────────────────────
-if __name__ == "__main__":
-    main()
+if __name__
