@@ -48,6 +48,7 @@ try:
     PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "3.61"))
     PER_100_PRICE_TELF = _dec(os.getenv("PER_100_PRICE_TELF", "5.05"))
     PER_100_PRICE_VIEWS = _dec(os.getenv("PER_100_PRICE_VIEWS", "1.44"))
+    PER_100_PRICE_REACTS = _dec(os.getenv("PER_100_PRICE_REACTS", "1.44"))
 
 except InvalidOperation:
     PER_100_PRICE = _dec("3.61")
@@ -240,7 +241,8 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for key in [
             "awaiting_qty", "awaiting_target",
             "awaiting_qty_telf", "awaiting_target_telf",
-            "awaiting_qty_views", "awaiting_link_views"
+            "awaiting_qty_views", "awaiting_post_count_views", "awaiting_link_views",
+            "awaiting_qty_reacts", "awaiting_post_count_reacts", "awaiting_link_reacts"
         ]:
             context.user_data.pop(key, None)
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
