@@ -221,6 +221,17 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if q.data == "menu:reactions":
+        context.user_data["awaiting_qty_reacts"] = True
+        log.info("[MENU] user=%s → awaiting_qty_reacts=True", q.from_user.id)
+        await q.edit_message_text(
+            "게시글 반응 수량을 입력해주세요\n"
+            "예: 100, 500, 1000  (100단위만 가능)\n"
+            f"100회 반응 = {PER_100_PRICE_REACTS} USDT",
+            reply_markup=back_only_kb()
+        )
+        return
+
     if q.data == "menu:notice":
         await q.edit_message_text(NOTICE_TEXT, reply_markup=back_only_kb())
         return
