@@ -45,11 +45,14 @@ def _dec(v, q="0.01", default="0.00"):
         return Decimal(default).quantize(Decimal(q))
 
 try:
-    PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "7.21"))
+    PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "3.61"))
     PER_100_PRICE_TELF = _dec(os.getenv("PER_100_PRICE_TELF", "5.05"))
+    PER_100_PRICE_VIEWS = _dec(os.getenv("PER_100_PRICE_VIEWS", "1.44"))
+
 except InvalidOperation:
-    PER_100_PRICE = _dec("7.21")
+    PER_100_PRICE = _dec("3.61")
     PER_100_PRICE_TELF = _dec("5.05")
+    PER_100_PRICE_VIEWS = _dec("1.44")
 
 # 허용오차(매칭) 기본값 0.01 USDT
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
@@ -92,6 +95,7 @@ NOTICE_TEXT = (
     "• 유령 인입 과정이 완료되기까지 그룹/채널 설정 금지\n"
     "• 작업 완료 시간은 약 10~20분 소요\n"
     "• 1개의 주소만 진행 가능합니다.\n"
+    "• 비공개로 설정시 진행은 불가하며 공개주소로 전달부탁드립니다.\n"
     "• 결제창 제한시간은 15분이며, 경과 시 처음부터 다시 결제 필요\n\n"
     "• 자판기 이용법을 위반하여 발생하는 불상사는 책임지지 않습니다.\n\n"
     "자판기 운영 취지:\n"
@@ -205,12 +209,28 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if q.data == "menu:views":
+        context.user_data["awaiting_qty_views"] = True
+        log.info("[MENU] user=%s → awaiting_qty_views=True", q.from_user.id)
+        await q.edit_message_text(
+            "조회수 수량을 입력해주세요\n"
+            "예: 100, 500, 1000  (100단위만 가능)\n"
+            f"100회 조회수 = {PER_100_PRICE_VIEWS} USDT",
+            reply_markup=back_only_kb()
+        )
+        return
+
     if q.data == "menu:notice":
         await q.edit_message_text(NOTICE_TEXT, reply_markup=back_only_kb())
         return
 
     if q.data == "back:main":
-        context.user_data.pop("awaiting_qty", None)
+        for key in [
+            "awaiting_qty", "awaiting_target",
+            "awaiting_qty_telf", "awaiting_target_telf",
+            "awaiting_qty_views", "awaiting_link_views"
+        ]:
+            context.user_data.pop(key, None)
         await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
         return
 
@@ -285,6 +305,107 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             reply_markup=back_only_kb()
         )
         return
+
+    # --- 조회수 수량 입력 ---
+    if context.user_data.get("awaiting_qty_views"):
+        text = update.message.text.strip().replace(",", "")
+        if not text.isdigit():
+            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
+            return
+
+        qty = int(text)
+        if qty < 100 or qty % 100 != 0:
+            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
+            return
+
+        # 금액 계산
+        blocks = qty // 100
+        amount = (PER_100_PRICE_VIEWS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 상태 업데이트
+        context.user_data["awaiting_qty_views"] = False
+        context.user_data["awaiting_post_count_views"] = True   # ✅ 게시글 개수 입력 단계
+        context.user_data["views_qty"] = qty
+        context.user_data["views_amount"] = amount
+
+        user_id = str(update.effective_user.id)
+        chat_id = update.effective_chat.id
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "views"}
+        _save_state()
+
+        await update.message.reply_text(
+            f"✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
+            "몇 개의 게시글에 분배할지 게시글 개수를 입력해주세요.\n"
+            "예: 1, 3, 5",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    # --- 조회수 게시글 개수 입력 ---
+    if context.user_data.get("awaiting_post_count_views"):
+        text = update.message.text.strip()
+        if not text.isdigit():
+            await update.message.reply_text("❌ 숫자만 입력해주세요. 예) 1, 3, 5", reply_markup=back_only_kb())
+            return
+
+        count = int(text)
+        if count < 1 or count > 20:
+            await update.message.reply_text("❌ 게시글 개수는 1~20개 사이만 가능합니다.", reply_markup=back_only_kb())
+            return
+
+        context.user_data["awaiting_post_count_views"] = False
+        context.user_data["awaiting_link_views"] = True
+        context.user_data["views_post_count"] = count
+        context.user_data["views_links"] = []
+
+        await update.message.reply_text(
+            f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
+            "각 링크는 한 줄씩 보내주시면 됩니다.",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    # --- 조회수 링크 입력 (여러 개) ---
+    if context.user_data.get("awaiting_link_views"):
+        link = update.message.text.strip()
+        context.user_data["views_links"].append(link)
+
+        links = context.user_data["views_links"]
+        count = context.user_data["views_post_count"]
+
+        if len(links) < count:
+            await update.message.reply_text(
+                f"✅ {len(links)}개 링크 확인되었습니다.\n"
+                f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
+                reply_markup=back_only_kb()
+            )
+            return   # ✅ 꼭 필요
+        else:
+            # 다 입력됨 → 주문 요약
+            context.user_data["awaiting_link_views"] = False
+            user_id = str(update.effective_user.id)
+            if user_id in pending_orders:
+                pending_orders[user_id]["target"] = links
+                _save_state()
+
+            qty = context.user_data["views_qty"]
+            amount = context.user_data["views_amount"]
+
+            await update.message.reply_text(
+                "🧾 최종 주문 요약\n"
+                f"- 조회수: {qty:,}회\n"
+                f"- 게시글 수: {count}개\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links)]) + "\n\n"
+                f"- 결제수단: USDT(TRC20)\n"
+                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+                f"- 결제금액: {amount} USDT\n\n"
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+                parse_mode="Markdown",
+                reply_markup=back_only_kb()
+            )
+            return
+
 
     # 2) 주소 입력 대기 상태일 때
     if context.user_data.get("awaiting_target"):
