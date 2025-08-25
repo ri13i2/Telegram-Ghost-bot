@@ -759,10 +759,6 @@ async def on_startup(app):
     app.create_task(check_tron_payments(app))
 
 def main():
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
         print("❌ BOT_TOKEN이 .env에 설정되지 않았습니다.")
@@ -785,4 +781,4 @@ def main():
 # 실행
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
