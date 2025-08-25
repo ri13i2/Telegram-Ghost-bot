@@ -46,8 +46,10 @@ def _dec(v, q="0.01", default="0.00"):
 
 try:
     PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "7.21"))
+    PER_100_PRICE_TELF = _dec(os.getenv("PER_100_PRICE_TELF", "5.05"))
 except InvalidOperation:
     PER_100_PRICE = _dec("7.21")
+    PER_100_PRICE_TELF = _dec("5.05")
 
 # 허용오차(매칭) 기본값 0.01 USDT
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
@@ -185,9 +187,20 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_qty"] = True
         log.info("[MENU] user=%s → awaiting_qty=True", q.from_user.id)
         await q.edit_message_text(
-            "인원수를 말씀해주세요\n"
+            "유령인원 수량을 입력해주세요\n"
             "예: 100, 500, 1000  100단위만 가능합니다.\n"
             f"100명당 {PER_100_PRICE} USDT",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    if q.data == "menu:telf_ghost":
+        context.user_data["awaiting_qty_telf"] = True
+        log.info("[MENU] user=%s → awaiting_qty_telf=True", q.from_user.id)
+        await q.edit_message_text(
+            "텔프유령인원 수량을 입력해주세요\n"
+            "예: 100, 500, 1000  100단위만 가능합니다.\n"
+            f"100명당 {PER_100_PRICE_TELF} USDT",
             reply_markup=back_only_kb()
         )
         return
@@ -233,7 +246,41 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _save_state()
 
         await update.message.reply_text(
-            f"✅ {qty:,}명 주문이 확인되었습니다.\n"
+            f"✅ 유령인원 {qty:,}명 주문이 확인되었습니다.\n"
+            "다음 단계로, 인원을 투입할 그룹/채널 주소(@username 또는 초대링크)를 입력해주세요.",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    # --- 텔프유령인원 수량 입력 ---
+    if context.user_data.get("awaiting_qty_telf"):
+        text = update.message.text.strip().replace(",", "")
+        if not text.isdigit():
+            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
+            return
+
+        qty = int(text)
+        if qty < 100 or qty % 100 != 0:
+            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
+            return
+
+        # 금액 계산 (텔프 단가)
+        blocks = qty // 100
+        amount = (PER_100_PRICE_TELF * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 상태 업데이트
+        context.user_data["awaiting_qty_telf"] = False
+        context.user_data["awaiting_target_telf"] = True
+        context.user_data["telf_qty"] = qty
+        context.user_data["telf_amount"] = amount
+
+        user_id = str(update.effective_user.id)
+        chat_id = update.effective_chat.id
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "telf"}
+        _save_state()
+
+        await update.message.reply_text(
+            f"✅ 텔프유령인원 {qty:,}명 주문 확인되었습니다.\n"
             "다음 단계로, 인원을 투입할 그룹/채널 주소(@username 또는 초대링크)를 입력해주세요.",
             reply_markup=back_only_kb()
         )
@@ -256,6 +303,34 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             "🧾 최종 주문 요약\n"
             f"- 유령인원: {qty:,}명\n"
+            f"- 대상주소: {target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+            f"- 결제금액: {amount} USDT\n\n"
+            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+            parse_mode="Markdown",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    # --- 텔프유령인원 주소 입력 ---
+    if context.user_data.get("awaiting_target_telf"):
+        target = update.message.text.strip()
+        context.user_data["awaiting_target_telf"] = False
+        context.user_data["telf_target"] = target
+
+        user_id = str(update.effective_user.id)
+        if user_id in pending_orders:
+            pending_orders[user_id]["target"] = target
+            _save_state()
+
+        qty = context.user_data["telf_qty"]
+        amount = context.user_data["telf_amount"]
+
+        await update.message.reply_text(
+            "🧾 최종 주문 요약\n"
+            f"- 텔프유령인원: {qty:,}명\n"
             f"- 대상주소: {target}\n"
             f"- 결제수단: USDT(TRC20)\n"
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
