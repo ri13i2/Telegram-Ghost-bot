@@ -358,6 +358,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["views_post_count"] = count
         context.user_data["views_links"] = []
 
+        # ✅ 여기서 총 결제금액 다시 계산
+        qty = context.user_data["views_qty"]
+        blocks = qty // 100
+        base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
+        total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        context.user_data["views_amount"] = total_amount
+
         await update.message.reply_text(
             f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
             "각 링크는 한 줄씩 보내주시면 됩니다.",
