@@ -632,7 +632,7 @@ def _nearest_pending(amount: Decimal, top_k=3):
     return diffs[:top_k]
 
 async def check_tron_payments(app):
-    params = {"sort": "-timestamp", "limit": "50", "start": "0", "address": PAYMENT_ADDRESS}
+    params = {"sort": "-timestamp", "limit": "200", "start": "0", "address": PAYMENT_ADDRESS}
 
     async with aiohttp.ClientSession() as session:
         while True:
@@ -671,22 +671,23 @@ async def check_tron_payments(app):
                                 continue
                             if amount is None:
                                 continue
-                            if to_addr.replace(" ", "").lower() != PAYMENT_ADDRESS.replace(" ", "").lower():
+                            # 수정: 지갑 주소 무시하고 "컨트랙트 == USDT_CONTRACT"만 확인
+                            if tx.get("contract_address", "").lower() != USDT_CONTRACT.lower():
                                 continue
 
                             matched_uid = None
 
-                            # 주문 매칭
                             for uid, order in list(pending_orders.items()):
-                                log.debug(
-                                    "[MATCH_ATTEMPT] TX=%s amount=%s ↔ 기대=%s (허용=±%s)",
-                                    txid, amount, order["amount"], AMOUNT_TOLERANCE
-                                )
                                 expected = order["amount"].quantize(Decimal("0.01"))
                                 actual   = amount.quantize(Decimal("0.01"))
+
+                                log.debug("[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s",
+                                          txid, actual, expected, AMOUNT_TOLERANCE)
+
                                 if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
-                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s (기대=%s)", uid, txid, actual, expected)
+                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s (기대=%s)",
+                                              uid, txid, actual, expected)
                                     break
 
                             if matched_uid:
