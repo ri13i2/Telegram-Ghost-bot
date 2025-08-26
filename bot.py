@@ -672,9 +672,16 @@ async def check_tron_payments(app):
                             if amount is None:
                                 continue
                             # 수정: 지갑 주소 무시하고 "컨트랙트 == USDT_CONTRACT"만 확인
+                            
+                            log.debug(
+                                "[FILTER_CHECK] TXID=%s | to_addr=%s | expected_payment=%s | contract=%s | expected_contract=%s",
+                                txid, to_addr, PAYMENT_ADDRESS, tx.get("contract_address"), USDT_CONTRACT
+                            )
+                            
+                            # 반드시 내 결제 주소로 들어온 것만 인정
                             if tx.get("contract_address", "").lower() != USDT_CONTRACT.lower():
                                 continue
-                            if to_addr.lower() != PAYMENT_ADDRESS.lower():
+                            if to_addr.lower().strip() != PAYMENT_ADDRESS.lower().strip():
                                 continue
 
                             matched_uid = None
@@ -683,8 +690,10 @@ async def check_tron_payments(app):
                                 expected = order["amount"].quantize(Decimal("0.01"))
                                 actual   = amount.quantize(Decimal("0.01"))
 
-                                log.debug("[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s",
-                                          txid, actual, expected, AMOUNT_TOLERANCE)
+                                log.debug(
+                                    "[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s (pending_orders=%s)",
+                                    txid, actual, expected, AMOUNT_TOLERANCE, list(pending_orders.values())
+                                )
 
                                 if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
