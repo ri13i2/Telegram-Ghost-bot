@@ -680,10 +680,10 @@ async def check_tron_payments(app):
                                     "[MATCH_ATTEMPT] TX=%s amount=%s ↔ 기대=%s (허용=±%s)",
                                      txid, amount, order["amount"], AMOUNT_TOLERANCE
                                  )
-                                 if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
-                                     matched_uid = uid
-                                     log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
-                                     break
+                            if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
+                                matched_uid = uid
+                                log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
+                                break
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
