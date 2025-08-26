@@ -671,7 +671,7 @@ async def check_tron_payments(app):
                                 continue
                             if amount is None:
                                 continue
-                            if to_addr.lower() != PAYMENT_ADDRESS.lower():
+                            if to_addr.replace(" ", "").lower() != PAYMENT_ADDRESS.replace(" ", "").lower():
                                 continue
 
                             matched_uid = None
@@ -682,9 +682,11 @@ async def check_tron_payments(app):
                                     "[MATCH_ATTEMPT] TX=%s amount=%s ↔ 기대=%s (허용=±%s)",
                                     txid, amount, order["amount"], AMOUNT_TOLERANCE
                                 )
-                                if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
+                                expected = order["amount"].quantize(Decimal("0.01"))
+                                actual   = amount.quantize(Decimal("0.01"))
+                                if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
-                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
+                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s (기대=%s)", uid, txid, actual, expected)
                                     break
 
                             if matched_uid:
