@@ -57,7 +57,7 @@ except InvalidOperation:
     PER_100_PRICE_REACTS = Decimal("1.44")
 
 # 허용오차(매칭) 기본값 0.01 USDT
-AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.01"))
+AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.10"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
 
@@ -675,11 +675,15 @@ async def check_tron_payments(app):
                                 continue
 
                             # 주문 매칭
-                            matched_uid = None
                             for uid, order in list(pending_orders.items()):
-                                if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
-                                    matched_uid = uid
-                                    break
+                                log.debug(
+                                    "[MATCH_ATTEMPT] TX=%s amount=%s ↔ 기대=%s (허용=±%s)",
+                                     txid, amount, order["amount"], AMOUNT_TOLERANCE
+                                 )
+                                 if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
+                                     matched_uid = uid
+                                     log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
+                                     break
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
