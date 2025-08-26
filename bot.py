@@ -674,6 +674,8 @@ async def check_tron_payments(app):
                             # 수정: 지갑 주소 무시하고 "컨트랙트 == USDT_CONTRACT"만 확인
                             if tx.get("contract_address", "").lower() != USDT_CONTRACT.lower():
                                 continue
+                            if to_addr.lower() != PAYMENT_ADDRESS.lower():
+                                continue
 
                             matched_uid = None
 
