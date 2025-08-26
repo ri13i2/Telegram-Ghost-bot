@@ -674,16 +674,18 @@ async def check_tron_payments(app):
                             if to_addr.lower() != PAYMENT_ADDRESS.lower():
                                 continue
 
+                            matched_uid = None
+
                             # 주문 매칭
                             for uid, order in list(pending_orders.items()):
                                 log.debug(
                                     "[MATCH_ATTEMPT] TX=%s amount=%s ↔ 기대=%s (허용=±%s)",
-                                     txid, amount, order["amount"], AMOUNT_TOLERANCE
-                                 )
-                            if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
-                                matched_uid = uid
-                                log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
-                                break
+                                    txid, amount, order["amount"], AMOUNT_TOLERANCE
+                                )
+                                if abs(order["amount"] - amount) <= AMOUNT_TOLERANCE:
+                                    matched_uid = uid
+                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, amount)
+                                    break
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
@@ -729,6 +731,7 @@ async def check_tron_payments(app):
 
                                 processed_txs.add(txid)
                                 _save_state()
+                                
                             else:
                                 # 매칭 실패 → 운영자에게 후보 보여주기
                                 if ADMIN_CHAT_ID:
