@@ -56,7 +56,7 @@ except InvalidOperation:
     PER_100_PRICE_VIEWS = _dec("1.44")
     PER_100_PRICE_REACTS = Decimal("1.44")
 
-# 허용오차(매칭) 기본값 0.01 USDT
+# 허용오차(매칭) 기본값 0.10 USDT
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.10"))
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG").upper()
@@ -108,7 +108,7 @@ NOTICE_TEXT = (
 )
 
 # ─────────────────────────────────────────────
-# 상태 저장 (주문/처리TX) — 파일 영구화
+# 상태 저장 (주문/처리TX)
 # ─────────────────────────────────────────────
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
@@ -591,48 +591,58 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
 # ─────────────────────────────────────────────
-# TRC20 USDT 전송 확인 + 주문 매칭 & 알림
+# 트론스캔 API 관련 유틸
 # ─────────────────────────────────────────────
 TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)"}
+
+def _extract_amount(tx: dict):
+    return (
+        tx.get("amount") or
+        tx.get("amount_str") or
+        tx.get("amountUInt64") or
+        tx.get("quant") or
+        tx.get("value") or
+        tx.get("tokenValue") or
+        tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("amount")
+    )
 
 def _to_decimal_amount(raw, token_decimals: int):
     if raw is None:
         return None
     try:
         s = str(raw)
-        if s.startswith("0x"):  # ✅ HEX 문자열 처리
+        if s.startswith("0x"):  # HEX 값
             val = int(s, 16)
             return (Decimal(val) / (Decimal(10) ** token_decimals)).quantize(Decimal("0.000000"))
-        if s.isdigit():  # amountUInt64 같은 정수형
+        if s.isdigit():  # 정수 문자열
             return (Decimal(s) / (Decimal(10) ** token_decimals)).quantize(Decimal("0.000000"))
-        return Decimal(s)  # 일반 소수 문자열
+        return Decimal(s)
     except (InvalidOperation, ValueError):
         return None
 
-def _extract_amount(tx: dict):
-    """여러 케이스에서 안전하게 amount_raw 추출"""
-    return (
-        tx.get("amount")
-        or tx.get("amount_str")
-        or tx.get("amountUInt64")
-        or tx.get("quant")
-        or tx.get("value")
-        or tx.get("tokenValue")
-        or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("amount")
-    )
+def _nearest_pending(amount, n=3):
+    """가장 가까운 금액 순으로 n개 pending order 반환"""
+    try:
+        diffs = []
+        for uid, order in pending_orders.items():
+            diff = abs(order["amount"] - amount)
+            diffs.append((diff, uid, order))
+        return sorted(diffs, key=lambda x: x[0])[:n]
+    except Exception:
+        return []
 
-def _nearest_pending(amount: Decimal, top_k=3):
-    """운영자 안전모드용 — 결제금액과 가장 가까운 주문 후보 찾기"""
-    diffs = []
-    for uid, order in pending_orders.items():
-        exp = order["amount"]
-        diffs.append((abs(amount - exp), uid, order))
-    diffs.sort(key=lambda x: x[0])
-    return diffs[:top_k]
-
+# ─────────────────────────────────────────────
+# 결제체커
+# ─────────────────────────────────────────────
 async def check_tron_payments(app):
-    params = {"sort": "-timestamp", "limit": "200", "start": "0", "address": PAYMENT_ADDRESS}
+    params = {
+        "sort": "-timestamp",
+        "limit": "200",
+        "start": "0",
+        "contract_address": USDT_CONTRACT,
+        "toAddress": PAYMENT_ADDRESS
+    }
 
     async with aiohttp.ClientSession() as session:
         while True:
@@ -641,17 +651,13 @@ async def check_tron_payments(app):
 
                 async with session.get(TRONSCAN_URL, params=params, headers=HEADERS, timeout=30) as resp:
                     if resp.status != 200:
-                        log.warning("[Tronscan] HTTP %s, 잠시 후 재시도", resp.status)
+                        log.warning("[Tronscan] HTTP %s", resp.status)
                         await asyncio.sleep(10)
                         continue
 
                     data = await resp.json()
                     txs = data.get("token_transfers", []) or []
                     log.debug("[FETCH] txs=%s", len(txs))
-
-                    if not txs:
-                        await asyncio.sleep(10)
-                        continue
 
                     for tx in txs:
                         try:
@@ -665,31 +671,22 @@ async def check_tron_payments(app):
 
                             log.debug("[TX] id=%s to=%s raw=%s -> %s", txid, to_addr, raw, amount)
 
-                            if not txid:
+                            if not txid or txid in processed_txs or amount is None:
                                 continue
-                            if txid in processed_txs:
-                                continue
-                            if amount is None:
-                                continue
-                            # 수정: 지갑 주소 무시하고 "컨트랙트 == USDT_CONTRACT"만 확인
+
                             if tx.get("contract_address", "").lower() != USDT_CONTRACT.lower():
-                                continue
-                            if to_addr.lower() != PAYMENT_ADDRESS.lower():
                                 continue
 
                             matched_uid = None
-
                             for uid, order in list(pending_orders.items()):
                                 expected = order["amount"].quantize(Decimal("0.01"))
                                 actual   = amount.quantize(Decimal("0.01"))
 
-                                log.debug("[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s",
-                                          txid, actual, expected, AMOUNT_TOLERANCE)
+                                log.debug("[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s", txid, actual, expected, AMOUNT_TOLERANCE)
 
                                 if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
-                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s (기대=%s)",
-                                              uid, txid, actual, expected)
+                                    log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, actual)
                                     break
 
                             if matched_uid:
@@ -700,45 +697,33 @@ async def check_tron_payments(app):
                                 amount_expected = order["amount"]
 
                                 # 고객 알림
-                                try:
-                                    await app.bot.send_message(
-                                        chat_id=chat_id,
-                                        text=(
-                                            "✅ 결제가 확인되었습니다!\n"
-                                            f"- 금액: {amount:.2f} USDT\n"
-                                            f"- 주문 수량: {qty:,}\n\n"
-                                            "15분 내로 인원이 들어갑니다."
-                                        )
-                                    )
-                                    log.info("[NOTIFY_USER_OK] uid=%s chat_id=%s", matched_uid, chat_id)
-                                except Exception as ee:
-                                    log.error("[NOTIFY_USER_FAIL] uid=%s err=%s", matched_uid, ee)
+                                await app.bot.send_message(
+                                    chat_id=chat_id,
+                                    text=(f"✅ 결제가 확인되었습니다!\n"
+                                          f"- 금액: {amount:.2f} USDT\n"
+                                          f"- 주문 수량: {qty:,}\n\n"
+                                          "15분 내로 인원이 들어갑니다.")
+                                )
 
                                 # 운영자 알림
                                 if ADMIN_CHAT_ID:
-                                    try:
-                                        user = await app.bot.get_chat(chat_id)
-                                        username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
-                                        await app.bot.send_message(
-                                            chat_id=ADMIN_CHAT_ID,
-                                            text=(
-                                                "🟢 [결제 확인]\n"
-                                                f"- 주문자: {username}\n"
-                                                f"- 수량: {qty:,}\n"
-                                                f"- 주소: {addr}\n"
-                                                f"- 금액: {amount_expected} USDT\n"
-                                                f"- TXID: {txid}"
-                                            ),
-                                            parse_mode="Markdown"
-                                        )
-                                    except Exception as ee:
-                                        log.error("[NOTIFY_ADMIN_FAIL] uid=%s err=%s", matched_uid, ee)
+                                    user = await app.bot.get_chat(chat_id)
+                                    username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
+                                    await app.bot.send_message(
+                                        chat_id=ADMIN_CHAT_ID,
+                                        text=(f"🟢 [결제 확인]\n"
+                                              f"- 주문자: {username}\n"
+                                              f"- 수량: {qty:,}\n"
+                                              f"- 주소: {addr}\n"
+                                              f"- 금액: {amount_expected} USDT\n"
+                                              f"- TXID: {txid}")
+                                    )
 
                                 processed_txs.add(txid)
                                 _save_state()
-                                
+
                             else:
-                                # 매칭 실패 → 운영자에게 후보 보여주기
+                                # 미매칭 결제
                                 if ADMIN_CHAT_ID:
                                     nearest = _nearest_pending(amount)
                                     cand = "\n".join([f"• UID={uid} 기대금액={order['amount']}" for _, uid, order in nearest])
@@ -750,7 +735,7 @@ async def check_tron_payments(app):
                                         f"- 금액: {amount:.6f} USDT\n\n"
                                         f"📌 후보 주문:\n{cand if cand else '없음'}"
                                     )
-                                    await app.bot.send_message(ADMIN_CHAT_ID, msg, parse_mode="Markdown")
+                                    await app.bot.send_message(ADMIN_CHAT_ID, msg)
 
                                 processed_txs.add(txid)
 
@@ -767,7 +752,6 @@ async def check_tron_payments(app):
 # 메인 실행부
 # ─────────────────────────────────────────────
 async def on_startup(app):
-    # 결제체커 루프 실행
     app.create_task(check_tron_payments(app))
 
 def main():
@@ -776,21 +760,15 @@ def main():
         print("❌ BOT_TOKEN이 .env에 설정되지 않았습니다.")
         return
 
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
-    # 기본 핸들러
+    # 핸들러 추가 (start, 메뉴, 입력)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_input_handler))
 
-    # v20.6에서는 run_polling에 on_startup 못 넣음 → post_init 사용
-    app.post_init = on_startup
-
     print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
 
-# ─────────────────────────────────────────────
-# 실행
-# ─────────────────────────────────────────────
 if __name__ == "__main__":
     main()
