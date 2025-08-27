@@ -595,7 +595,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ─────────────────────────────────────────────
 # 트론스캔 API 관련 유틸
 # ─────────────────────────────────────────────
-TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
+TRONSCAN_URL = "https://apilist.tronscan.org/api/token_trc20/transfers"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)",
     "TRON-PRO-API-KEY": os.getenv("TRON_API_KEY")
