@@ -76,6 +76,7 @@ log.info(
     masked_token, ADMIN_CHAT_ID, PAYMENT_ADDRESS, USDT_CONTRACT,
     PER_100_PRICE, AMOUNT_TOLERANCE, LOG_LEVEL
 )
+log.info("🔑 TRON_API_KEY=%s", os.getenv("TRON_API_KEY"))
 
 # ─────────────────────────────────────────────
 # 안내 텍스트
