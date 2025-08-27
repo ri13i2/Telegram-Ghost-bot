@@ -594,8 +594,10 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # 트론스캔 API 관련 유틸
 # ─────────────────────────────────────────────
 TRONSCAN_URL = "https://apilist.tronscanapi.com/api/token_trc20/transfers"
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)"}
-
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)",
+    "TRON-PRO-API-KEY": os.getenv("TRON_API_KEY")
+}
 def _extract_amount(tx: dict):
     return (
         tx.get("amount") or
