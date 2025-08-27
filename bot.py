@@ -595,10 +595,11 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ─────────────────────────────────────────────
 # 트론스캔 API 관련 유틸
 # ─────────────────────────────────────────────
-TRONSCAN_URL = "https://apilist.tronscan.org/api/token_trc20/transfers"
+TRONGRID_URL = f"https://api.trongrid.io/v1/accounts/{PAYMENT_ADDRESS}/transactions/trc20"
+
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; PaymentChecker/1.0)",
-    "TRON-PRO-API-KEY": os.getenv("TRON_API_KEY")
+    "accept": "application/json",
+    "TRON-PRO-API-KEY": os.getenv("TRON_API_KEY")  # <- TronGrid에서 발급받은 키
 }
 def _extract_amount(tx: dict):
     return (
@@ -653,7 +654,8 @@ async def check_tron_payments(app):
             try:
                 log.debug("[LOOP] pending=%s processed=%s", len(pending_orders), len(processed_txs))
 
-                async with session.get(TRONSCAN_URL, params=params, headers=HEADERS, timeout=30) as resp:
+                async with session.get(TRONGRID_URL, headers=HEADERS, timeout=30) as resp:
+
                     if resp.status != 200:
                         log.warning("[Tronscan] HTTP %s", resp.status)
                         await asyncio.sleep(10)
