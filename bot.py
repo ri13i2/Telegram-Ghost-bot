@@ -597,7 +597,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ─────────────────────────────────────────────
 TRONGRID_URL = (
     f"https://api.trongrid.io/v1/accounts/{PAYMENT_ADDRESS}/transactions/trc20"
-    f"?contract_address={USDT_CONTRACT}"&only_to=true"
+    f"?contract_address={USDT_CONTRACT}&only_to=true"
 )
 
 HEADERS = {
