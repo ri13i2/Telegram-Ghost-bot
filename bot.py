@@ -595,7 +595,10 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # ─────────────────────────────────────────────
 # 트론스캔 API 관련 유틸
 # ─────────────────────────────────────────────
-TRONGRID_URL = f"https://api.trongrid.io/v1/accounts/{PAYMENT_ADDRESS}/transactions/trc20"
+TRONGRID_URL = (
+    f"https://api.trongrid.io/v1/accounts/{PAYMENT_ADDRESS}/transactions/trc20"
+    f"?contract_address={USDT_CONTRACT}"
+)
 
 HEADERS = {
     "accept": "application/json",
@@ -662,7 +665,7 @@ async def check_tron_payments(app):
                         continue
 
                     data = await resp.json()
-                    txs = data.get("token_transfers", []) or []
+                    txs = data.get("data") or data.get("token_transfers") or []
                     log.debug("[FETCH] txs=%s", len(txs))
 
                     for tx in txs:
