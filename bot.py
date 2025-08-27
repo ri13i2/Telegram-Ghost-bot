@@ -669,9 +669,17 @@ async def check_tron_payments(app):
                     log.debug("[FETCH] txs=%s", len(txs))
 
                     for tx in txs:
+                        log.debug("[RAW_TX] %s", json.dumps(tx, ensure_ascii=False))
                         try:
                             txid = tx.get("transaction_id") or tx.get("hash")
-                            to_addr = (tx.get("to_address") or "").strip()
+                            to_addr = (
+                                tx.get("to_address")
+                                or tx.get("to")  # 혹시 다른 키에 들어올 수 있음
+                                or tx.get("transferToAddress")
+                                or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("to_address")
+                                or ""
+                            ).strip()
+
                             from_addr = (tx.get("from_address") or "").strip()
                             token_decimals = int(tx.get("tokenDecimal", 6))
 
