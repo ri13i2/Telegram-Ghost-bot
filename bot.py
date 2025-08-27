@@ -11,8 +11,9 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, CallbackQueryHandler,
-    MessageHandler, ContextTypes, filters
+    MessageHandler, ContextTypes, filters,
 )
+from datetime import datetime, timedelta
 import aiohttp
 
 # ─────────────────────────────────────────────
@@ -119,13 +120,15 @@ def _save_state():
     try:
         data = {
             "pending_orders": {
-                str(uid): {
-                    "qty": v["qty"],
-                    "amount": str(v["amount"]),
-                    "chat_id": v["chat_id"],
-                }
-                for uid, v in pending_orders.items()
-            },
+                 str(uid): {
+                     "qty": v["qty"],
+                     "amount": str(v["amount"]),
+                     "chat_id": v["chat_id"],
+                     "created_at": v.get("created_at", datetime.utcnow().timestamp())
+                 }
+                 for uid, v in pending_orders.items()
+               },
+
             "processed_txs": list(processed_txs)[-2000:],
         }
         STATE_FILE.write_text(
@@ -148,7 +151,9 @@ def _load_state():
                     "qty": int(v["qty"]),
                     "amount": _dec(v["amount"]),
                     "chat_id": int(v["chat_id"]),
-                }
+                    "created_at": float(v.get("created_at", datetime.utcnow().timestamp())),
+                 }
+
             except Exception:
                 continue
         pending_orders = po
@@ -278,7 +283,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id}
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -312,7 +317,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "telf"}
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "telf", "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -346,7 +351,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "views"}
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "views", "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -381,7 +386,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "reacts"}
+        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "reacts", "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -644,17 +649,35 @@ def _nearest_pending(amount, n=3):
 # 결제체커
 # ─────────────────────────────────────────────
 async def check_tron_payments(app):
-    params = {
-        "sort": "-timestamp",
-        "limit": "200",
-        "start": "0",
-        "contract_address": USDT_CONTRACT,
-        "toAddress": PAYMENT_ADDRESS
-    }
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
+                now_ts = datetime.utcnow().timestamp()
+                expired = [uid for uid, order in pending_orders.items()
+                           if now_ts - order.get("created_at", now_ts) > 900]  # 900초 = 15분
+
+                for uid in expired:
+                    order = pending_orders.pop(uid, None)
+                    if not order:
+                        continue
+                    chat_id = order["chat_id"]
+
+                    # 고객 알림
+                    try:
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text="⏰ 결제 시간이 15분 초과되어 주문이 자동 취소되었습니다.\n"
+                                 "다시 주문을 진행해주세요."
+                        )
+                    except Exception as e:
+                        log.error("[TIMEOUT_NOTIFY_FAIL] uid=%s chat_id=%s err=%s", uid, chat_id, e)
+
+                    # 운영자 로그
+                    log.warning("[TIMEOUT] uid=%s 주문이 15분 경과로 자동취소됨", uid)
+
+                    _save_state()
+
                 log.debug("[LOOP] pending=%s processed=%s", len(pending_orders), len(processed_txs))
 
                 async with session.get(TRONGRID_URL, headers=HEADERS, timeout=30) as resp:
@@ -699,12 +722,17 @@ async def check_tron_payments(app):
                                 expected = order["amount"].quantize(Decimal("0.01"))
                                 actual   = amount.quantize(Decimal("0.01"))
 
-                                log.debug("[MATCH_ATTEMPT] TX=%s actual=%s expected=%s tol=%s", txid, actual, expected, AMOUNT_TOLERANCE)
+                                log.debug("[MATCH_ATTEMPT] txid=%s uid=%s actual=%s expected=%s tol=%s",
+                                          txid, uid, actual, expected, AMOUNT_TOLERANCE)
 
                                 if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
                                     log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, actual)
                                     break
+                                    
+                            # ✅ for 루프 끝난 뒤에 실행
+                            if not matched_uid:   # ✅ for 루프 끝난 뒤에 위치
+                                log.debug("[MATCH_FAIL] txid=%s 금액=%s 어떤 주문과도 매칭 안 됨", txid, amount)
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
@@ -759,7 +787,7 @@ async def check_tron_payments(app):
                         except Exception as e:
                             log.error("[ERROR] tx parse failed: %s", e)
                             continue
-
+                            
             except Exception as e:
                 log.error("[ERROR] tron payment check failed: %s", e)
 
