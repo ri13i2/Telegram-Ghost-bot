@@ -653,11 +653,37 @@ def _nearest_pending(amount, n=3):
     except Exception:
         return []
 
-# ─────────────────────────────────────────────
-# 결제체커 (개선 버전)
-# ─────────────────────────────────────────────
+# ─────────────────────────────
+# TronGrid / TronScan API 공통 조회 함수
+# ─────────────────────────────
+async def fetch_txs(session, url, headers=None):
+    try:
+        async with session.get(url, headers=headers, timeout=30) as resp:
+            if resp.status != 200:
+                log.warning("[API_FAIL] %s HTTP %s", url, resp.status)
+                return []
+            data = await resp.json()
+
+            # TronGrid 응답 구조
+            if "data" in data:
+                return data["data"]
+            # TronScan 응답 구조
+            if "token_transfers" in data:
+                return data["token_transfers"]
+            if "trc20_transfers" in data:
+                return data["trc20_transfers"]
+
+            return []
+    except Exception as e:
+        log.error("[API_ERROR] url=%s err=%s", url, e)
+        return []
+
+
+# ─────────────────────────────
+# 결제 감지 & 매칭 루프
+# ─────────────────────────────
 last_seen_ts = 0
-seen_txids = set()   # 📌 새로 추가: 같은 timestamp라도 TXID로 중복 처리 방지
+seen_txids = set()   # 같은 타임스탬프라도 TXID 단위로 중복 처리 방지
 
 async def check_tron_payments(app):
     global last_seen_ts, seen_txids
@@ -665,18 +691,19 @@ async def check_tron_payments(app):
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                # ── 1) TronGrid transactions/trc20
+                # 1) TronGrid 기본 transactions/trc20
                 txs = await fetch_txs(session, TRONGRID_URL, HEADERS)
 
-                # ── 2) TronGrid events fallback
+                # 2) TronGrid events fallback
                 if not txs:
                     alt_url = f"https://api.trongrid.io/v1/contracts/{USDT_CONTRACT}/events?event_name=Transfer&limit=20"
                     txs = await fetch_txs(session, alt_url, HEADERS)
 
-                # ── 3) TronScan fallback
+                # 3) TronScan fallback
                 if not txs:
                     txs = await fetch_txs(session, TRONSCAN_URL)
 
+                # 최초 실행 시 타임스탬프 초기화
                 if last_seen_ts == 0 and txs:
                     last_seen_ts = max(tx.get("block_timestamp") or tx.get("timestamp") or 0 for tx in txs)
                     log.info("[INIT] last_seen_ts 초기화=%s", last_seen_ts)
@@ -691,12 +718,12 @@ async def check_tron_payments(app):
                     ts = tx.get("block_timestamp") or tx.get("timestamp") or 0
                     txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
 
-                    # 📌 중복 방지: timestamp 같아도 TXID 단위로 처리
+                    # 중복 방지
                     if not txid or txid in processed_txs or txid in seen_txids:
                         continue
-
                     if ts < last_seen_ts:
                         continue
+
                     last_seen_ts = max(last_seen_ts, ts)
                     seen_txids.add(txid)
 
@@ -718,7 +745,7 @@ async def check_tron_payments(app):
                         if amount is None:
                             continue
 
-                        # 📌 매칭 체크 로깅 추가
+                        # ── 매칭 체크 ──
                         for uid, order in list(pending_orders.items()):
                             expected = order["amount"].quantize(Decimal("0.01"))
                             actual = amount.quantize(Decimal("0.01"))
@@ -761,7 +788,7 @@ async def check_tron_payments(app):
                                 _save_state()
                                 break
                         else:
-                            # 📌 매칭 실패 로그 + 알림
+                            # 매칭 실패 처리
                             log.warning("[MATCH_FAIL] txid=%s 금액=%s → 매칭 실패", txid, amount)
                             if ADMIN_CHAT_ID:
                                 await app.bot.send_message(
