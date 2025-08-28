@@ -740,6 +740,19 @@ async def check_tron_payments(app):
                             if not matched_uid:
                                 log.warning("[MATCH_FAIL] txid=%s 금액=%s → 어떤 주문과도 매칭되지 않음", txid, amount)
 
+                                # 운영자 알림 (매칭 실패)
+                                if ADMIN_CHAT_ID:
+                                    try:
+                                        await app.bot.send_message(
+                                             ADMIN_CHAT_ID,
+                                             f"⚠️ [매칭 실패]\n"
+                                             f"- TXID: {txid}\n"
+                                             f"- 금액: {amount} USDT\n"
+                                             f"- 어떤 주문과도 매칭되지 않음"
+                                         )
+                                    except Exception as e:
+                                        log.error("[ADMIN_NOTIFY_FAIL] 매칭 실패 알림 전송 실패: %s", e)
+
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
                                 chat_id = order["chat_id"]
@@ -796,6 +809,12 @@ async def check_tron_payments(app):
                             
             except Exception as e:
                 log.error("[ERROR] tron payment check failed: %s", e)
+
+            # 흐름 로그 강화
+            log.debug(
+                "[FLOW] expired=%s txs=%s pending=%s processed=%s",
+                len(expired), len(txs), len(pending_orders), len(processed_txs)
+            )
 
             await asyncio.sleep(5)
 
