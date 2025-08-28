@@ -657,51 +657,28 @@ def _nearest_pending(amount, n=3):
 # 결제체커 (개선 버전)
 # ─────────────────────────────────────────────
 last_seen_ts = 0
-
-TRONSCAN_URL = f"https://apilist.tronscanapi.com/api/token_trc20/transfers?limit=20&sort=-timestamp&toAddress={PAYMENT_ADDRESS}&contract_address={USDT_CONTRACT}"
-
-async def fetch_txs(session, url, headers=None):
-    try:
-        async with session.get(url, headers=headers, timeout=30) as resp:
-            if resp.status != 200:
-                log.warning("[API_FAIL] %s HTTP %s", url, resp.status)
-                return []
-            data = await resp.json()
-            # TronGrid 구조
-            if "data" in data:
-                return data["data"]
-            if "token_transfers" in data:
-                return data["token_transfers"]
-            # TronScan 구조
-            if "token_transfers" in data:
-                return data["token_transfers"]
-            if "trc20_transfers" in data:
-                return data["trc20_transfers"]
-            return []
-    except Exception as e:
-        log.error("[API_ERROR] url=%s err=%s", url, e)
-        return []
+seen_txids = set()   # 📌 새로 추가: 같은 timestamp라도 TXID로 중복 처리 방지
 
 async def check_tron_payments(app):
-    global last_seen_ts
+    global last_seen_ts, seen_txids
 
     async with aiohttp.ClientSession() as session:
         while True:
             try:
-                # ── 1) 기본: TronGrid transactions/trc20
+                # ── 1) TronGrid transactions/trc20
                 txs = await fetch_txs(session, TRONGRID_URL, HEADERS)
 
-                # ── 2) 보강: TronGrid events/trc20/transfer
+                # ── 2) TronGrid events fallback
                 if not txs:
-                    alt_url = f"https://api.trongrid.io/v1/contracts/{USDT_CONTRACT}/events?event_name=Transfer&limit=20&only_to={PAYMENT_ADDRESS}"
+                    alt_url = f"https://api.trongrid.io/v1/contracts/{USDT_CONTRACT}/events?event_name=Transfer&limit=20"
                     txs = await fetch_txs(session, alt_url, HEADERS)
 
-                # ── 3) 최종 fallback: TronScan
+                # ── 3) TronScan fallback
                 if not txs:
                     txs = await fetch_txs(session, TRONSCAN_URL)
 
                 if last_seen_ts == 0 and txs:
-                    last_seen_ts = max(tx.get("block_timestamp", 0) for tx in txs)
+                    last_seen_ts = max(tx.get("block_timestamp") or tx.get("timestamp") or 0 for tx in txs)
                     log.info("[INIT] last_seen_ts 초기화=%s", last_seen_ts)
                     await asyncio.sleep(5)
                     continue
@@ -712,14 +689,20 @@ async def check_tron_payments(app):
 
                 for tx in txs:
                     ts = tx.get("block_timestamp") or tx.get("timestamp") or 0
-                    if ts <= last_seen_ts:
+                    txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
+
+                    # 📌 중복 방지: timestamp 같아도 TXID 단위로 처리
+                    if not txid or txid in processed_txs or txid in seen_txids:
+                        continue
+
+                    if ts < last_seen_ts:
                         continue
                     last_seen_ts = max(last_seen_ts, ts)
+                    seen_txids.add(txid)
 
                     log.debug("[RAW_TX] %s", json.dumps(tx, ensure_ascii=False))
 
                     try:
-                        txid = tx.get("transaction_id") or tx.get("hash") or tx.get("transactionHash")
                         to_addr = (tx.get("to_address") or tx.get("to") or tx.get("toAddress") or "").strip()
                         from_addr = (tx.get("from_address") or tx.get("from") or tx.get("fromAddress") or "").strip()
 
@@ -732,56 +715,53 @@ async def check_tron_payments(app):
                         amount = _to_decimal_amount(raw, token_decimals)
                         log.debug("[TX] id=%s to=%s raw=%s -> %s", txid, to_addr, raw, amount)
 
-                        if not txid or txid in processed_txs or amount is None:
-                            continue
-                        if (tx.get("contract_address") or tx.get("contractAddress") or "").lower() != USDT_CONTRACT.lower():
+                        if amount is None:
                             continue
 
-                        # ── 매칭 로직 (기존 코드 그대로)
-                        matched_uid = None
+                        # 📌 매칭 체크 로깅 추가
                         for uid, order in list(pending_orders.items()):
                             expected = order["amount"].quantize(Decimal("0.01"))
                             actual = amount.quantize(Decimal("0.01"))
+                            log.debug("[MATCH_CHECK] uid=%s expected=%s actual=%s tol=%s", uid, expected, actual, AMOUNT_TOLERANCE)
 
                             if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                 matched_uid = uid
                                 log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, actual)
-                                break
 
-                        if matched_uid:
-                            order = pending_orders.pop(matched_uid)
-                            chat_id = order["chat_id"]
-                            qty = order["qty"]
-                            addr = order.get("target", "❌ 주소 미입력")
-                            amount_expected = order["amount"]
+                                # 고객 알림
+                                chat_id = order["chat_id"]
+                                qty = order["qty"]
+                                addr = order.get("target", "❌ 주소 미입력")
+                                amount_expected = order["amount"]
 
-                            # 고객 알림
-                            await app.bot.send_message(
-                                chat_id=chat_id,
-                                text=(f"✅ 결제가 확인되었습니다!\n"
-                                      f"- 금액: {amount:.2f} USDT\n"
-                                      f"- 주문 수량: {qty:,}\n\n"
-                                      "15분 내로 인원이 들어갑니다.")
-                            )
-
-                            # 운영자 알림
-                            if ADMIN_CHAT_ID:
-                                user = await app.bot.get_chat(chat_id)
-                                username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
                                 await app.bot.send_message(
-                                    chat_id=ADMIN_CHAT_ID,
-                                    text=(f"🟢 [결제 확인]\n"
-                                          f"- 주문자: {username}\n"
-                                          f"- 수량: {qty:,}\n"
-                                          f"- 주소: {addr}\n"
-                                          f"- 금액: {amount_expected} USDT\n"
-                                          f"- TXID: {txid}")
+                                    chat_id=chat_id,
+                                    text=(f"✅ 결제가 확인되었습니다!\n"
+                                          f"- 금액: {amount:.2f} USDT\n"
+                                          f"- 주문 수량: {qty:,}\n\n"
+                                          "15분 내로 인원이 들어갑니다.")
                                 )
 
-                            processed_txs.add(txid)
-                            _save_state()
+                                # 운영자 알림
+                                if ADMIN_CHAT_ID:
+                                    user = await app.bot.get_chat(chat_id)
+                                    username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
+                                    await app.bot.send_message(
+                                        chat_id=ADMIN_CHAT_ID,
+                                        text=(f"🟢 [결제 확인]\n"
+                                              f"- 주문자: {username}\n"
+                                              f"- 수량: {qty:,}\n"
+                                              f"- 주소: {addr}\n"
+                                              f"- 금액: {amount_expected} USDT\n"
+                                              f"- TXID: {txid}")
+                                    )
 
+                                processed_txs.add(txid)
+                                pending_orders.pop(matched_uid)
+                                _save_state()
+                                break
                         else:
+                            # 📌 매칭 실패 로그 + 알림
                             log.warning("[MATCH_FAIL] txid=%s 금액=%s → 매칭 실패", txid, amount)
                             if ADMIN_CHAT_ID:
                                 await app.bot.send_message(
