@@ -493,7 +493,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"- 결제수단: USDT(TRC20)\n"
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으
+                "⚠️ 반드시 위 정확한 금액(소수점 포함)으
                 로 송금해주세요.\n"
                 "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
