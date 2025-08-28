@@ -493,8 +493,9 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"- 결제수단: USDT(TRC20)\n"
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다."
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으
+                로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="Markdown",
                 reply_markup=back_only_kb()
@@ -536,6 +537,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="Markdown",
                 reply_markup=back_only_kb()
@@ -564,6 +566,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="Markdown",
             reply_markup=back_only_kb()
@@ -592,6 +595,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="Markdown",
             reply_markup=back_only_kb()
@@ -698,7 +702,7 @@ async def check_tron_payments(app):
                             txid = tx.get("transaction_id") or tx.get("hash")
                             to_addr = (
                                 tx.get("to_address")
-                                or tx.get("to")  # 혹시 다른 키에 들어올 수 있음
+                                or tx.get("to")
                                 or tx.get("transferToAddress")
                                 or tx.get("raw_data", {}).get("contract", [{}])[0].get("parameter", {}).get("value", {}).get("to_address")
                                 or ""
@@ -723,17 +727,19 @@ async def check_tron_payments(app):
                                 expected = order["amount"].quantize(Decimal("0.01"))
                                 actual   = amount.quantize(Decimal("0.01"))
 
-                                log.debug("[MATCH_ATTEMPT] txid=%s uid=%s actual=%s expected=%s tol=%s",
-                                          txid, uid, actual, expected, AMOUNT_TOLERANCE)
+                                log.debug(
+                                    "[MATCH_ATTEMPT] txid=%s uid=%s actual=%s expected=%s tol=±%s",
+                                    txid, uid, actual, expected, AMOUNT_TOLERANCE
+                                )
 
                                 if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                     matched_uid = uid
                                     log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, actual)
                                     break
-                                    
-                            # ✅ for 루프 끝난 뒤에 실행
-                            if not matched_uid:   # ✅ for 루프 끝난 뒤에 위치
-                                log.debug("[MATCH_FAIL] txid=%s 금액=%s 어떤 주문과도 매칭 안 됨", txid, amount)
+
+                            # ✅ 반드시 for 루프 끝난 뒤 실행
+                            if not matched_uid:
+                                log.warning("[MATCH_FAIL] txid=%s 금액=%s → 어떤 주문과도 매칭되지 않음", txid, amount)
 
                             if matched_uid:
                                 order = pending_orders.pop(matched_uid)
