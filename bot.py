@@ -764,7 +764,7 @@ async def check_tron_payments(app):
                                 await app.bot.send_message(
                                     chat_id=chat_id,
                                     text=(f"✅ 결제가 확인되었습니다!\n"
-                                          f"- 금액: {amount:.2f} USDT\n"
+                                          f"- 금액: {order['amount']:.2f} USDT\n"
                                           f"- 주문 수량: {qty:,}\n\n"
                                           "15분 내로 인원이 들어갑니다.")
                                 )
