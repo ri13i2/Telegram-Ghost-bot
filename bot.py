@@ -143,18 +143,19 @@ def _save_state():
                 for uid, v in pending_orders.items()
             },
             "processed_txs": list(processed_txs)[-2000:],
-            "last_seen_ts": last_seen_ts,   # ★ 추가
+            "last_seen_ts": last_seen_ts,
+            "seen_txids": list(seen_txids)[-2000:],  # 최근 본 TXID 저장
         }
         STATE_FILE.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        log.debug("[STATE] saved pending=%s processed=%s ts=%s",
+        log.debug("[STATE] saved pending=%s processed=%s last_seen=%s",
                   len(pending_orders), len(processed_txs), last_seen_ts)
     except Exception as e:
         log.error("[STATE_SAVE_ERROR] %s", e)
 
 def _load_state():
-    global pending_orders, processed_txs, last_seen_ts
+    global pending_orders, processed_txs, last_seen_ts, seen_txids
     if not STATE_FILE.exists():
         return
     try:
@@ -172,13 +173,37 @@ def _load_state():
                 continue
         pending_orders = po
         processed_txs = set(data.get("processed_txs") or [])
-        last_seen_ts = float(data.get("last_seen_ts", 0))   # ★ 추가
-        log.info("[STATE] loaded pending=%s processed=%s ts=%s",
+        last_seen_ts = data.get("last_seen_ts", 0)
+        seen_txids = set(data.get("seen_txids") or [])
+        log.info("[STATE] loaded pending=%s processed=%s last_seen=%s",
                  len(pending_orders), len(processed_txs), last_seen_ts)
     except Exception as e:
         log.error("[STATE_LOAD_ERROR] %s", e)
 
-_load_state()
+def _load_state():
+    global pending_orders, processed_txs, last_seen_ts, seen_txids
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        po = {}
+        for uid, v in (data.get("pending_orders") or {}).items():
+            try:
+                po[str(uid)] = {
+                    "qty": int(v["qty"]),
+                    "amount": _dec(v["amount"]),
+                    "chat_id": int(v["chat_id"]),
+                    "created_at": float(v.get("created_at", datetime.utcnow().timestamp())),
+                }
+            except Exception:
+                continue
+        pending_orders = po
+        processed_txs = set(data.get("processed_txs") or [])
+        last_seen_ts = float(data.get("last_seen_ts", 0))
+        seen_txids = set(data.get("seen_txids") or [])
+        log.info("[STATE] loaded pending=%s processed=%s", len(pending_orders), len(processed_txs))
+    except Exception as e:
+        log.error("[STATE_LOAD_ERROR] %s", e)
 
 # ─────────────────────────────────────────────
 # 키보드
@@ -803,13 +828,16 @@ async def check_tron_payments(app):
                                 _save_state()
                                 break
                         else:
-                            # 매칭 실패 처리
-                            log.warning("[MATCH_FAIL] txid=%s 금액=%s → 매칭 실패", txid, amount)
-                            if ADMIN_CHAT_ID:
-                                await app.bot.send_message(
-                                    ADMIN_CHAT_ID,
-                                    f"⚠️ [미매칭 결제 감지]\n- TXID: {txid}\n- From: {from_addr}\n- To: {to_addr}\n- 금액: {amount:.6f} USDT"
-                                )
+                        # 매칭 실패 처리 (현재 유효한 주문이 있을 때만 알림)
+                            if pending_orders:
+                                log.warning("[MATCH_FAIL] txid=%s 금액=%s → 매칭 실패", txid, amount)
+                                if ADMIN_CHAT_ID:
+                                    await app.bot.send_message(
+                                        ADMIN_CHAT_ID,
+                                        f"⚠️ [미매칭 결제 감지]\n- TXID: {txid}\n- From: {from_addr}\n- To: {to_addr}\n- 금액: {amount:.6f} USDT"
+                                    )
+                            else:
+                                log.debug("[SKIP_FAIL] 주문 없음 → 미매칭 무시")
                             processed_txs.add(txid)
                             _save_state()
 
