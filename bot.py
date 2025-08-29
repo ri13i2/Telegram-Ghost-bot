@@ -16,6 +16,13 @@ from telegram.ext import (
 )
 from datetime import datetime, timedelta
 from telegram.helpers import escape_markdown
+
+def safe_md(text: str) -> str:
+        """MarkdownV2 안전 escape (언더바 포함)"""
+        if not text:
+            return ""
+        return escape_markdown(text, version=2)
+
 import aiohttp
 
 # ─────────────────────────────────────────────
@@ -121,31 +128,33 @@ NOTICE_TEXT = (
 # ─────────────────────────────────────────────
 pending_orders: dict[str, dict] = {}
 processed_txs: set[str] = set()
+last_seen_ts: float = 0.0   # ★ 추가
 
 def _save_state():
     try:
         data = {
             "pending_orders": {
-                 str(uid): {
-                     "qty": v["qty"],
-                     "amount": str(v["amount"]),
-                     "chat_id": v["chat_id"],
-                     "created_at": v.get("created_at", datetime.utcnow().timestamp())
-                 }
-                 for uid, v in pending_orders.items()
-               },
-
+                str(uid): {
+                    "qty": v["qty"],
+                    "amount": str(v["amount"]),
+                    "chat_id": v["chat_id"],
+                    "created_at": v.get("created_at", datetime.utcnow().timestamp())
+                }
+                for uid, v in pending_orders.items()
+            },
             "processed_txs": list(processed_txs)[-2000:],
+            "last_seen_ts": last_seen_ts,   # ★ 추가
         }
         STATE_FILE.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-        log.debug("[STATE] saved pending=%s processed=%s", len(pending_orders), len(processed_txs))
+        log.debug("[STATE] saved pending=%s processed=%s ts=%s",
+                  len(pending_orders), len(processed_txs), last_seen_ts)
     except Exception as e:
         log.error("[STATE_SAVE_ERROR] %s", e)
 
 def _load_state():
-    global pending_orders, processed_txs
+    global pending_orders, processed_txs, last_seen_ts
     if not STATE_FILE.exists():
         return
     try:
@@ -158,13 +167,14 @@ def _load_state():
                     "amount": _dec(v["amount"]),
                     "chat_id": int(v["chat_id"]),
                     "created_at": float(v.get("created_at", datetime.utcnow().timestamp())),
-                 }
-
+                }
             except Exception:
                 continue
         pending_orders = po
         processed_txs = set(data.get("processed_txs") or [])
-        log.info("[STATE] loaded pending=%s processed=%s", len(pending_orders), len(processed_txs))
+        last_seen_ts = float(data.get("last_seen_ts", 0))   # ★ 추가
+        log.info("[STATE] loaded pending=%s processed=%s ts=%s",
+                 len(pending_orders), len(processed_txs), last_seen_ts)
     except Exception as e:
         log.error("[STATE_LOAD_ERROR] %s", e)
 
@@ -465,6 +475,68 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
+    # --- 유령인원 주소 입력 ---
+    if context.user_data.get("awaiting_target"):
+        target = update.message.text.strip()
+        context.user_data["awaiting_target"] = False
+        context.user_data["ghost_target"] = target
+
+        safe_target = safe_md(target)
+
+        user_id = str(update.effective_user.id)
+        if user_id in pending_orders:
+            pending_orders[user_id]["target"] = target
+            _save_state()
+
+        qty = context.user_data["ghost_qty"]
+        amount = context.user_data["ghost_amount"]
+
+        await update.message.reply_text(
+            "🧾 최종 주문 요약\n"
+            f"- 유령인원: {qty:,}명\n"
+            f"- 대상주소: {safe_target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+            f"- 결제금액: {amount} USDT\n\n"
+            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+            parse_mode="MarkdownV2",
+            reply_markup=back_only_kb()
+        )
+        return
+
+    # --- 텔프유령인원 주소 입력 ---
+    if context.user_data.get("awaiting_target_telf"):
+        target = update.message.text.strip()
+        context.user_data["awaiting_target_telf"] = False
+        context.user_data["ghost_target_telf"] = target
+
+        safe_target = safe_md(target)
+
+        user_id = str(update.effective_user.id)
+        if user_id in pending_orders:
+            pending_orders[user_id]["target_telf"] = target
+            _save_state()
+
+        qty = context.user_data["ghost_qty_telf"]
+        amount = context.user_data["ghost_amount_telf"]
+
+        await update.message.reply_text(
+            "🧾 최종 주문 요약\n"
+            f"- 텔프유령인원: {qty:,}명\n"
+            f"- 대상주소: {safe_target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+            f"- 결제금액: {amount} USDT\n\n"
+            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+            "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
+            parse_mode="MarkdownV2",
+            reply_markup=back_only_kb()
+        )
+        return
+
     # --- 조회수 링크 입력 (여러 개) ---
     if context.user_data.get("awaiting_link_views"):
         link = update.message.text.strip()
@@ -484,25 +556,23 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_views_done"] = True
             context.user_data["awaiting_link_views"] = False
 
+            safe_links = [safe_md(l) for l in links]
+
             qty = context.user_data["views_qty"]
             amount = context.user_data["views_amount"]
             count = len(links)
 
-            text = (
+            await update.message.reply_text(
                 "🧾 최종 주문 요약\n"
                 f"- 조회수: {qty:,}회\n"
                 f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) + "\n\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: {PAYMENT_ADDRESS}\n"
+                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 정확한 금액(소수점 포함) 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
-                "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅"
-            )
-
-            await update.message.reply_text(
-                escape_markdown(text, version=2),
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+                "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
@@ -527,101 +597,27 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_reacts_done"] = True
             context.user_data["awaiting_link_reacts"] = False
 
+            safe_links = [safe_md(l) for l in links]
+
             qty = context.user_data["reacts_qty"]
             amount = context.user_data["reacts_amount"]
             count = len(links)
 
-            text = (
+            await update.message.reply_text(
                 "🧾 최종 주문 요약\n"
                 f"- 반응: {qty:,}회\n"
                 f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) + "\n\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: {PAYMENT_ADDRESS}\n"
+                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 정확한 금액(소수점 포함) 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
-                "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅"
-            )
-
-            await update.message.reply_text(
-                escape_markdown(text, version=2),
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+                "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
             return
-
-    # --- 유령인원 주소 입력 ---
-    if context.user_data.get("awaiting_target"):
-        target = update.message.text.strip()
-        context.user_data["awaiting_target"] = False
-        context.user_data["ghost_target"] = target
-
-        user_id = str(update.effective_user.id)
-        if user_id in pending_orders:
-            pending_orders[user_id]["target"] = target
-            _save_state()
-
-        qty = context.user_data["ghost_qty"]
-        amount = context.user_data["ghost_amount"]
-
-        # ✅ 안전 처리
-        safe_target = escape_markdown(target, version=2)
-
-        text = (
-            "🧾 최종 주문 요약\n"
-            f"- 유령인원: {qty:,}명\n"
-            f"- 대상주소: {safe_target}\n"
-            f"- 결제수단: USDT(TRC20)\n"
-            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-            f"- 결제금액: {amount} USDT\n\n"
-            "⚠️ 반드시 위 정확한 금액(소수점 포함) 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
-            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅"
-        )
-
-        await update.message.reply_text(
-            text,
-            parse_mode="MarkdownV2",
-            reply_markup=back_only_kb()
-        )
-        return
-
-    # --- 텔프유령인원 주소 입력 ---
-    if context.user_data.get("awaiting_target_telf"):
-        target = update.message.text.strip()
-        context.user_data["awaiting_target_telf"] = False
-        context.user_data["ghost_target_telf"] = target
-
-        user_id = str(update.effective_user.id)
-        if user_id in pending_orders:
-            pending_orders[user_id]["target_telf"] = target
-            _save_state()
-
-        qty = context.user_data["ghost_qty_telf"]
-        amount = context.user_data["ghost_amount_telf"]
-
-        # ✅ 안전 처리
-        safe_target = escape_markdown(target, version=2)
-
-        text = (
-            "🧾 최종 주문 요약\n"
-            f"- 텔프유령인원: {qty:,}명\n"
-            f"- 대상주소: {safe_target}\n"
-            f"- 결제수단: USDT(TRC20)\n"
-            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-            f"- 결제금액: {amount} USDT\n\n"
-            "⚠️ 반드시 위 정확한 금액(소수점 포함) 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
-            "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅"
-        )
-
-        await update.message.reply_text(
-            text,
-            parse_mode="MarkdownV2",
-            reply_markup=back_only_kb()
-        )
-        return
 
 # ─────────────────────────────────────────────
 # 트론스캔 API 관련 유틸
@@ -743,6 +739,7 @@ async def check_tron_payments(app):
                         continue
 
                     last_seen_ts = max(last_seen_ts, ts)
+                    _save_state()
                     seen_txids.add(txid)
 
                     log.debug("[RAW_TX] %s", json.dumps(tx, ensure_ascii=False))
