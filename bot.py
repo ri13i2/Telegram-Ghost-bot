@@ -17,13 +17,18 @@ from telegram.ext import (
 from datetime import datetime, timedelta
 from telegram.helpers import escape_markdown
 
-def safe_md(text: str) -> str:
-        """MarkdownV2 안전 escape (언더바 포함)"""
-        if not text:
-            return ""
-        return escape_markdown(text, version=2)
-
 import aiohttp
+
+# ─────────────────────────────────────────────
+# 안전한 MarkdownV2 이스케이프 함수
+# ─────────────────────────────────────────────
+def safe_md(text: str) -> str:
+    if not text:
+        return ""
+    escape_chars = r"\_*[]()~`>#+-=|{}.!<>"
+    for ch in escape_chars:
+        text = text.replace(ch, "\\" + ch)
+    return text
 
 # ─────────────────────────────────────────────
 # 환경 변수 로드
@@ -506,6 +511,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["awaiting_target"] = False
         context.user_data["ghost_target"] = target
 
+        # ✅ 안전 처리
         safe_target = safe_md(target)
 
         user_id = str(update.effective_user.id)
@@ -524,7 +530,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-            "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="MarkdownV2",
             reply_markup=back_only_kb()
@@ -537,6 +543,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["awaiting_target_telf"] = False
         context.user_data["ghost_target_telf"] = target
 
+        # ✅ 안전 처리
         safe_target = safe_md(target)
 
         user_id = str(update.effective_user.id)
@@ -555,7 +562,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-            "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="MarkdownV2",
             reply_markup=back_only_kb()
@@ -576,11 +583,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return
+            return   # 아직 덜 받았으면 종료
         else:
             context.user_data["awaiting_link_views_done"] = True
-            context.user_data["awaiting_link_views"] = False
+            context.user_data["awaiting_link_views"] = False   # 입력 상태 종료
 
+            # ✅ 안전 처리
             safe_links = [safe_md(l) for l in links]
 
             qty = context.user_data["views_qty"]
@@ -596,7 +604,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-                "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
@@ -617,11 +625,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return
+            return   # 아직 덜 받았으면 종료
         else:
             context.user_data["awaiting_link_reacts_done"] = True
-            context.user_data["awaiting_link_reacts"] = False
+            context.user_data["awaiting_link_reacts"] = False   # 입력 상태 종료
 
+            # ✅ 안전 처리
             safe_links = [safe_md(l) for l in links]
 
             qty = context.user_data["reacts_qty"]
@@ -637,7 +646,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-                "15분 이내로 결제가 이루어지지 않을 시 자동취소됩니다.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
