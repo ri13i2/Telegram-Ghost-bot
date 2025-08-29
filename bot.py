@@ -338,6 +338,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         chat_id = update.effective_chat.id
         pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "created_at": datetime.utcnow().timestamp()}
         _save_state()
+        log.info("[STATE] 주문 저장됨 uid=%s qty=%s amount=%s", user_id, qty, amount)
 
         await update.message.reply_text(
             f"✅ 유령인원 {qty:,}명 주문이 확인되었습니다.\n"
@@ -742,7 +743,6 @@ async def fetch_txs(session, url, headers=None):
         log.error("[API_ERROR] url=%s err=%s", url, e)
         return []
 
-
 # ─────────────────────────────
 # 결제 감지 & 매칭 루프
 # ─────────────────────────────
@@ -853,22 +853,69 @@ async def check_tron_payments(app):
                                 _save_state()
                                 break
                         else:
-                        # 매칭 실패 처리 (현재 유효한 주문이 있을 때만 알림)
+                            # 매칭 실패 처리
                             if pending_orders:
                                 log.warning("[MATCH_FAIL] txid=%s 금액=%s → 매칭 실패", txid, amount)
                                 if ADMIN_CHAT_ID:
                                     await app.bot.send_message(
                                         ADMIN_CHAT_ID,
-                                        f"⚠️ [미매칭 결제 감지]\n- TXID: {txid}\n- From: {from_addr}\n- To: {to_addr}\n- 금액: {amount:.6f} USDT"
+                                        f"⚠️ [미매칭 결제 감지]\n"
+                                        f"- TXID: {txid}\n"
+                                        f"- From: {from_addr}\n"
+                                        f"- To: {to_addr}\n"
+                                        f"- 금액: {amount:.6f} USDT\n"
+                                        f"- 현재 보류 주문 수: {len(pending_orders)}개"
                                     )
                             else:
-                                log.debug("[SKIP_FAIL] 주문 없음 → 미매칭 무시")
+                                # 주문이 전혀 없는 상태에서 결제 들어옴
+                                log.warning("[NO_ORDER_PAYMENT] txid=%s 금액=%s", txid, amount)
+                                if ADMIN_CHAT_ID:
+                                    await app.bot.send_message(
+                                        ADMIN_CHAT_ID,
+                                        f"⚠️ [주문 없는 결제 감지]\n"
+                                        f"- TXID: {txid}\n"
+                                        f"- From: {from_addr}\n"
+                                        f"- To: {to_addr}\n"
+                                        f"- 금액: {amount:.6f} USDT\n"
+                                        "👉 주문 데이터가 없어 자동 처리 불가합니다."
+                                    )
                             processed_txs.add(txid)
                             _save_state()
 
                     except Exception as e:
                         log.error("[ERROR] tx parse failed: %s", e)
                         continue
+
+                # ── 주문 만료(15분 초과) 체크 ──
+                now = datetime.utcnow().timestamp()
+                expired = []
+                for uid, order in list(pending_orders.items()):
+                    if now - order.get("created_at", now) > 900:  # 900초 = 15분
+                        expired.append((uid, order))
+
+                for uid, order in expired:
+                    chat_id = order["chat_id"]
+                    try:
+                        # 고객 알림
+                        await app.bot.send_message(
+                            chat_id=chat_id,
+                            text="⏰ 결제 제한시간(15분)이 초과되어 주문이 자동 취소되었습니다.\n"
+                                 "다시 주문을 진행해주세요."
+                        )
+                        # 운영자 알림
+                        if ADMIN_CHAT_ID:
+                            await app.bot.send_message(
+                                ADMIN_CHAT_ID,
+                                f"❌ [주문 취소됨 - 시간초과]\n"
+                                f"- UID: {uid}\n"
+                                f"- 수량: {order['qty']:,}\n"
+                                f"- 금액: {order['amount']} USDT"
+                            )
+                    except Exception as e:
+                        log.error("[EXPIRE_NOTIFY_ERROR] uid=%s err=%s", uid, e)
+
+                    pending_orders.pop(uid, None)
+                    _save_state()
 
             except Exception as e:
                 log.error("[ERROR] tron payment check failed: %s", e)
