@@ -551,8 +551,8 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             pending_orders[user_id]["target_telf"] = target
             _save_state()
 
-        qty = context.user_data["ghost_qty_telf"]
-        amount = context.user_data["ghost_amount_telf"]
+        qty = context.user_data["telf_qty"]
+        amount = context.user_data["telf_amount"]
 
         await update.message.reply_text(
             "🧾 최종 주문 요약\n"
