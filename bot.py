@@ -6,6 +6,7 @@ import asyncio
 import logging
 import json
 import re
+import random
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from dotenv import load_dotenv
@@ -319,7 +320,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # 금액 계산
         blocks = qty // 100
-        amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        base_amount = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 0.001 ~ 0.009 USDT 랜덤 오프셋
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+
+        # 최종 금액
+        amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
         # 상태 업데이트
         context.user_data["awaiting_qty"] = False
@@ -353,7 +360,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # 금액 계산 (텔프 단가)
         blocks = qty // 100
-        amount = (PER_100_PRICE_TELF * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        base_amount = (PER_100_PRICE_TELF * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 0.001 ~ 0.009 USDT 랜덤 오프셋
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+
+        # 최종 금액
+        amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
         # 상태 업데이트
         context.user_data["awaiting_qty_telf"] = False
@@ -387,17 +400,23 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         # 금액 계산
         blocks = qty // 100
-        amount = (PER_100_PRICE_VIEWS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        base_amount = (PER_100_PRICE_VIEWS * Decimal(blocks) * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 0.001 ~ 0.009 USDT 랜덤 오프셋
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+
+        # 최종 금액
+        total_amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
         # 상태 업데이트
         context.user_data["awaiting_qty_views"] = False
         context.user_data["awaiting_post_count_views"] = True   # ✅ 게시글 개수 입력 단계
         context.user_data["views_qty"] = qty
-        context.user_data["views_amount"] = amount
+        context.user_data["views_amount"] = total_amount
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "views", "created_at": datetime.utcnow().timestamp()}
+        pending_orders[user_id] = {"qty": qty, "amount": total_amount, "chat_id": chat_id, "type": "views", "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -421,18 +440,27 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         # 금액 계산
+        qty = context.user_data["reacts_qty"]
         blocks = qty // 100
-        amount = (PER_100_PRICE_REACTS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        base_amount = (PER_100_PRICE_REACTS * Decimal(blocks) * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+        # 0.001 ~ 0.009 USDT 랜덤 오프셋
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+
+        # 최종 금액
+        total_amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+        context.user_data["reacts_amount"] = total_amount
 
         # 상태 업데이트
         context.user_data["awaiting_qty_reacts"] = False
         context.user_data["awaiting_post_count_reacts"] = True
         context.user_data["reacts_qty"] = qty
-        context.user_data["reacts_amount"] = amount
+        context.user_data["reacts_amount"] = total_amount
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "reacts", "created_at": datetime.utcnow().timestamp()}
+        pending_orders[user_id] = {"qty": qty, "amount": total_amount, "chat_id": chat_id, "type": "reacts", "created_at": datetime.utcnow().timestamp()}
         _save_state()
 
         await update.message.reply_text(
@@ -465,7 +493,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         blocks = qty // 100
         base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
         total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        context.user_data["views_amount"] = total_amount
+        context.user_data["views_amount"] = amount
 
         await update.message.reply_text(
             f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
@@ -496,7 +524,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         blocks = qty // 100
         base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
         total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        context.user_data["reacts_amount"] = total_amount
+        context.user_data["reacts_amount"] = amount
 
         await update.message.reply_text(
             f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
