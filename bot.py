@@ -511,9 +511,6 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["awaiting_target"] = False
         context.user_data["ghost_target"] = target
 
-        # ✅ 안전 처리
-        safe_target = safe_md(target)
-
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target"] = target
@@ -523,16 +520,16 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         amount = context.user_data["ghost_amount"]
 
         await update.message.reply_text(
-            "🧾 최종 주문 요약\n"
-            f"- 유령인원: {qty:,}명\n"
-            f"- 대상주소: {safe_target}\n"
-            f"- 결제수단: USDT(TRC20)\n"
-            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-            f"- 결제금액: {amount} USDT\n\n"
-            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
+            "🧾 <b>최종 주문 요약</b>\n"
+            f"- 유령인원: <b>{qty:,}명</b>\n"
+            f"- 대상주소: <code>{target}</code>\n"
+            f"- 결제수단: <b>USDT(TRC20)</b>\n"
+            f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+            f"- 결제금액: <b>{amount} USDT</b>\n\n"
+            "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
+            "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-            parse_mode="MarkdownV2",
+            parse_mode="HTML",
             reply_markup=back_only_kb()
         )
         return
@@ -543,9 +540,6 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data["awaiting_target_telf"] = False
         context.user_data["ghost_target_telf"] = target
 
-        # ✅ 안전 처리
-        safe_target = safe_md(target)
-
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target_telf"] = target
@@ -555,16 +549,16 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         amount = context.user_data["telf_amount"]
 
         await update.message.reply_text(
-            "🧾 최종 주문 요약\n"
-            f"- 텔프유령인원: {qty:,}명\n"
-            f"- 대상주소: {safe_target}\n"
-            f"- 결제수단: USDT(TRC20)\n"
-            f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-            f"- 결제금액: {amount} USDT\n\n"
-            "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
+            "🧾 <b>최종 주문 요약</b>\n"
+            f"- 텔프유령인원: <b>{qty:,}명</b>\n"
+            f"- 대상주소: <code>{target}</code>\n"
+            f"- 결제수단: <b>USDT(TRC20)</b>\n"
+            f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+            f"- 결제금액: <b>{amount} USDT</b>\n\n"
+            "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
+            "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-            parse_mode="MarkdownV2",
+            parse_mode="HTML",
             reply_markup=back_only_kb()
         )
         return
@@ -588,25 +582,22 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_views_done"] = True
             context.user_data["awaiting_link_views"] = False   # 입력 상태 종료
 
-            # ✅ 안전 처리
-            safe_links = [safe_md(l) for l in links]
-
             qty = context.user_data["views_qty"]
             amount = context.user_data["views_amount"]
             count = len(links)
 
             await update.message.reply_text(
-                "🧾 최종 주문 요약\n"
-                f"- 조회수: {qty:,}회\n"
-                f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
-                f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-                f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
+                "🧾 <b>최종 주문 요약</b>\n"
+                f"- 조회수: <b>{qty:,}회</b>\n"
+                f"- 게시글 수: <b>{count}개</b>\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. <code>{l}</code>" for i, l in enumerate(links, 1)]) + "\n\n"
+                f"- 결제수단: <b>USDT(TRC20)</b>\n"
+                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+                f"- 결제금액: <b>{amount} USDT</b>\n\n"
+                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
             return
@@ -630,25 +621,22 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_reacts_done"] = True
             context.user_data["awaiting_link_reacts"] = False   # 입력 상태 종료
 
-            # ✅ 안전 처리
-            safe_links = [safe_md(l) for l in links]
-
             qty = context.user_data["reacts_qty"]
             amount = context.user_data["reacts_amount"]
             count = len(links)
 
             await update.message.reply_text(
-                "🧾 최종 주문 요약\n"
-                f"- 반응: {qty:,}회\n"
-                f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
-                f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-                f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
+                "🧾 <b>최종 주문 요약</b>\n"
+                f"- 반응: <b>{qty:,}회</b>\n"
+                f"- 게시글 수: <b>{count}개</b>\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. <code>{l}</code>" for i, l in enumerate(links, 1)]) + "\n\n"
+                f"- 결제수단: <b>USDT(TRC20)</b>\n"
+                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+                f"- 결제금액: <b>{amount} USDT</b>\n\n"
+                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
             return
