@@ -5,6 +5,7 @@ import os
 import asyncio
 import logging
 import json
+import re
 from pathlib import Path
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters,
 )
 from datetime import datetime, timedelta
+from telegram.helpers import escape_markdown
 import aiohttp
 
 # ─────────────────────────────────────────────
@@ -477,30 +479,31 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return   # ✅ 꼭 필요
+            return   # ✅ 아직 덜 받았으면 여기서 종료
         else:
-            # 다 입력됨 → 주문 요약
-            context.user_data["awaiting_link_views"] = False
-            user_id = str(update.effective_user.id)
-            if user_id in pending_orders:
-                pending_orders[user_id]["target"] = links
-                _save_state()
+            # ✅ 마지막 링크까지 다 받으면 완료 플래그 켜기
+            context.user_data["awaiting_link_views_done"] = True
+            context.user_data["awaiting_link_views"] = False   # 입력 상태 종료
+
+            # ✅ 안전 처리
+            safe_links = [escape_markdown(l, version=2) for l in links]
 
             qty = context.user_data["views_qty"]
             amount = context.user_data["views_amount"]
+            count = len(links)
 
             await update.message.reply_text(
                 "🧾 최종 주문 요약\n"
                 f"- 조회수: {qty:,}회\n"
                 f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links)]) + "\n\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
-                "⚠️ 반드시 위 \"정확한 금액(소수점 포함)\" 으로 송금해주세요.\n"
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
                 "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
             return
@@ -519,39 +522,43 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return
+            return   # ✅ 아직 다 안 받았으면 종료
         else:
-            # 다 입력됨 → 주문 요약
-            context.user_data["awaiting_link_reacts"] = False
-            user_id = str(update.effective_user.id)
-            if user_id in pending_orders:
-                pending_orders[user_id]["target"] = links
-                _save_state()
+            # ✅ 마지막 링크까지 다 받으면 완료 플래그 켜기
+            context.user_data["awaiting_link_reacts_done"] = True
+            context.user_data["awaiting_link_reacts"] = False   # 입력 상태 종료
+
+            # ✅ 안전 처리
+            safe_links = [escape_markdown(l, version=2) for l in links]
 
             qty = context.user_data["reacts_qty"]
             amount = context.user_data["reacts_amount"]
+            count = len(links)
 
             await update.message.reply_text(
                 "🧾 최종 주문 요약\n"
-                f"- 반응: {qty:,}개\n"
+                f"- 반응: {qty:,}회\n"
                 f"- 게시글 수: {count}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links)]) + "\n\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
                 f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
                 f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
                 "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="Markdown",
+                parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
             return
 
-    # 2) 주소 입력 대기 상태일 때
+    # --- 유령인원 주소 입력 ---
     if context.user_data.get("awaiting_target"):
         target = update.message.text.strip()
         context.user_data["awaiting_target"] = False
         context.user_data["ghost_target"] = target
+
+        # ✅ 안전 처리
+        safe_target = escape_markdown(target, version=2)
 
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
@@ -564,43 +571,47 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             "🧾 최종 주문 요약\n"
             f"- 유령인원: {qty:,}명\n"
-            f"- 대상주소: {target}\n"
+            f"- 대상주소: {safe_target}\n"
             f"- 결제수단: USDT(TRC20)\n"
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
             "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-            parse_mode="Markdown",
+            parse_mode="MarkdownV2",
             reply_markup=back_only_kb()
         )
         return
+
 
     # --- 텔프유령인원 주소 입력 ---
     if context.user_data.get("awaiting_target_telf"):
         target = update.message.text.strip()
         context.user_data["awaiting_target_telf"] = False
-        context.user_data["telf_target"] = target
+        context.user_data["ghost_target_telf"] = target
+
+        # ✅ 안전 처리
+        safe_target = escape_markdown(target, version=2)
 
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
-            pending_orders[user_id]["target"] = target
+            pending_orders[user_id]["target_telf"] = target
             _save_state()
 
-        qty = context.user_data["telf_qty"]
-        amount = context.user_data["telf_amount"]
+        qty = context.user_data["ghost_qty_telf"]
+        amount = context.user_data["ghost_amount_telf"]
 
         await update.message.reply_text(
             "🧾 최종 주문 요약\n"
             f"- 텔프유령인원: {qty:,}명\n"
-            f"- 대상주소: {target}\n"
+            f"- 대상주소: {safe_target}\n"
             f"- 결제수단: USDT(TRC20)\n"
             f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
             f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
             "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-            parse_mode="Markdown",
+            parse_mode="MarkdownV2",
             reply_markup=back_only_kb()
         )
         return
