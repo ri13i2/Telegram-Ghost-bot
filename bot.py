@@ -398,14 +398,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
-        # 👉 수량만 저장
         context.user_data["views_qty"] = qty
         context.user_data["awaiting_qty_views"] = False
         context.user_data["awaiting_post_count_views"] = True
 
         await update.message.reply_text(
-            "✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
-            "몇 개의 게시글에 분배할지 게시글 개수를 입력해주세요.\n"
+            f"✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
+            "📌 원하시는 게시글 수량을 입력해주세요\n"
             "예: 1, 3, 5",
             reply_markup=back_only_kb()
         )
@@ -422,14 +421,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
-        # 👉 수량만 저장
         context.user_data["reacts_qty"] = qty
         context.user_data["awaiting_qty_reacts"] = False
         context.user_data["awaiting_post_count_reacts"] = True
 
         await update.message.reply_text(
-            "✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
-            "몇 개의 게시글에 분배할지 게시글 개수를 입력해주세요.\n"
+            f"✅ 반응 {qty:,}개 주문 확인되었습니다.\n"
+            "📌 원하시는 게시글 수량을 입력해주세요\n"
             "예: 1, 3, 5",
             reply_markup=back_only_kb()
         )
@@ -447,30 +445,16 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         context.user_data["views_post_count"] = count
-        qty = context.user_data["views_qty"]
-        blocks = qty // 100
-
-        # 👉 최종 금액 계산
-        base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
-        total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        context.user_data["views_amount"] = total_amount
+        context.user_data["views_links"] = []
         context.user_data["awaiting_post_count_views"] = False
+        context.user_data["awaiting_link_views"] = True
 
-        # 👉 주문 데이터 저장
-        user_id = str(update.effective_user.id)
-        chat_id = update.effective_chat.id
-        pending_orders[user_id] = {
-            "qty": qty, "amount": total_amount,
-            "chat_id": chat_id, "type": "views",
-            "created_at": datetime.utcnow().timestamp()
-        }
-        _save_state()
+        qty = context.user_data["views_qty"]
 
         await update.message.reply_text(
-            f"✅ 조회수 {qty:,}회 주문이 확인되었습니다.\n"
-            f"게시글 {count}개에 분배됩니다.\n"
-            "🧾 최종 주문 요약이 곧 표시됩니다.",
+            f"✅ 게시글 {count}개 선택하셨습니다.\n"
+            f"👉 각 게시글당 {qty:,}씩 투입됩니다.\n"
+            f"진행할 게시글 링크 {count}개를 순서대로 입력해주세요.",
             reply_markup=back_only_kb()
         )
         return
@@ -487,33 +471,19 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         context.user_data["reacts_post_count"] = count
-        qty = context.user_data["reacts_qty"]
-        blocks = qty // 100
-
-        # 👉 최종 금액 계산
-        base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
-        total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        context.user_data["reacts_amount"] = total_amount
+        context.user_data["reacts_links"] = []
         context.user_data["awaiting_post_count_reacts"] = False
+        context.user_data["awaiting_link_reacts"] = True
 
-        # 👉 주문 데이터 저장
-        user_id = str(update.effective_user.id)
-        chat_id = update.effective_chat.id
-        pending_orders[user_id] = {
-           "qty": qty, "amount": total_amount,
-            "chat_id": chat_id, "type": "reacts",
-            "created_at": datetime.utcnow().timestamp()
-        }
-        _save_state()
+        qty = context.user_data["reacts_qty"]
 
         await update.message.reply_text(
-            f"✅ 반응 {qty:,}회 주문이 확인되었습니다.\n"
-            f"게시글 {count}개에 분배됩니다.\n"
-            "🧾 최종 주문 요약이 곧 표시됩니다.",
+            f"✅ 게시글 {count}개 선택하셨습니다.\n"
+            f"👉 각 게시글당 {qty:,}개씩 투입됩니다.\n"
+            f"진행할 게시글 링크 {count}개를 순서대로 입력해주세요.",
             reply_markup=back_only_kb()
         )
-        return
+    return
 
     # --- 유령인원 주소 입력 ---
     if context.user_data.get("awaiting_target"):
@@ -573,7 +543,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    # --- 조회수 링크 입력 (여러 개) ---
+    # --- 조회수 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_views"):
         link = update.message.text.strip()
         context.user_data["views_links"].append(link)
@@ -583,36 +553,39 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if len(links) < count:
             await update.message.reply_text(
-                f"✅ {len(links)}개 링크 확인되었습니다.\n"
+                f"✅ {len(links)}개 링크 확인됨.\n"
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return   # 아직 덜 받았으면 종료
+            return
         else:
-            context.user_data["awaiting_link_views_done"] = True
-            context.user_data["awaiting_link_views"] = False   # 입력 상태 종료
+            context.user_data["awaiting_link_views"] = False
 
             qty = context.user_data["views_qty"]
-            amount = context.user_data["views_amount"]
-            count = len(links)
+            blocks = qty // 100
+            base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
+            total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+            context.user_data["views_amount"] = total_amount
+
+            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
-                "🧾 <b>최종 주문 요약</b>\n"
-                f"- 조회수: <b>{qty:,}회</b>\n"
-                f"- 게시글 수: <b>{count}개</b>\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. <code>{l}</code>" for i, l in enumerate(links, 1)]) + "\n\n"
-                f"- 결제수단: <b>USDT(TRC20)</b>\n"
-                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-                f"- 결제금액: <b>{amount} USDT</b>\n\n"
-                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
+                "🧾 최종 주문 요약\n"
+                f"- 조회수: {qty:,}개 × {count}개 게시글\n"
+                f"- 총 주문량: {qty * count:,}\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
+                f"- 결제수단: USDT(TRC20)\n"
+                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+                f"- 결제금액: {total_amount} USDT\n\n"
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="HTML",
+                parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
             return
 
-    # --- 반응 링크 입력 (여러 개) ---
+    # --- 반응 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_reacts"):
         link = update.message.text.strip()
         context.user_data["reacts_links"].append(link)
@@ -622,31 +595,34 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         if len(links) < count:
             await update.message.reply_text(
-                f"✅ {len(links)}개 링크 확인되었습니다.\n"
+                f"✅ {len(links)}개 링크 확인됨.\n"
                 f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
-            return   # 아직 덜 받았으면 종료
+            return
         else:
-            context.user_data["awaiting_link_reacts_done"] = True
-            context.user_data["awaiting_link_reacts"] = False   # 입력 상태 종료
+            context.user_data["awaiting_link_reacts"] = False
 
             qty = context.user_data["reacts_qty"]
-            amount = context.user_data["reacts_amount"]
-            count = len(links)
+            blocks = qty // 100
+            base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
+            total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+            context.user_data["reacts_amount"] = total_amount
+
+            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
-                "🧾 <b>최종 주문 요약</b>\n"
-                f"- 반응: <b>{qty:,}회</b>\n"
-                f"- 게시글 수: <b>{count}개</b>\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. <code>{l}</code>" for i, l in enumerate(links, 1)]) + "\n\n"
-                f"- 결제수단: <b>USDT(TRC20)</b>\n"
-                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-                f"- 결제금액: <b>{amount} USDT</b>\n\n"
-                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
+                "🧾 최종 주문 요약\n"
+                f"- 반응: {qty:,} × {count}개 게시글\n"
+                f"- 총 주문량: {qty * count:,}개\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
+                f"- 결제수단: USDT(TRC20)\n"
+                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
+                f"- 결제금액: {total_amount} USDT\n\n"
+                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="HTML",
+                parse_mode="MarkdownV2",
                 reply_markup=back_only_kb()
             )
             return
