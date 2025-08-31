@@ -575,7 +575,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
-                pending_orders[user_id] = {
+            pending_orders[user_id] = {
                 "qty": qty * count,
                 "amount": total_amount,
                 "chat_id": chat_id,
