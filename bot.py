@@ -545,7 +545,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # --- 조회수 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_views"):
-    link = update.message.text.strip()
+        link = update.message.text.strip()
         context.user_data["views_links"].append(link)
 
         links = context.user_data["views_links"]
