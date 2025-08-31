@@ -552,13 +552,15 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["views_post_count"]
 
         if len(links) < count:
+            # 아직 덜 입력 → 진행 상황 안내
             await update.message.reply_text(
-                f"✅ {len(links)}개 링크 확인됨.\n"
-                f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
+                f"✅ {len(links)}개 게시글 입력 완료.\n"
+                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.",
                 reply_markup=back_only_kb()
             )
             return
         else:
+            # 링크 다 입력됨 → 최종 요약
             context.user_data["awaiting_link_views"] = False
 
             qty = context.user_data["views_qty"]
@@ -568,19 +570,31 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             context.user_data["views_amount"] = total_amount
 
-            safe_links = [safe_md(l) for l in links]
+            # 결제 매칭을 위해 pending_orders 저장
+            user_id = str(update.effective_user.id)
+            chat_id = update.effective_chat.id
+            pending_orders[user_id] = {
+                "qty": qty * count,
+                "amount": total_amount,
+                "chat_id": chat_id,
+                "type": "views",
+                "created_at": datetime.utcnow().timestamp()
+            }
+            _save_state()
+
+            safe_links = [safe_md(l) for l in links[:count]]
             await update.message.reply_text(
-                "🧾 최종 주문 요약\n"
+                "🧾 <b>최종 주문 요약</b>\n"
                 f"- 조회수: {qty:,}개 × {count}개 게시글\n"
-                f"- 총 주문량: {qty * count:,}\n"
+                f"- 총 주문량: {qty * count:,}개\n"
                 f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-                f"- 결제금액: {total_amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+                f"- 결제금액: <b>{total_amount} USDT</b>\n\n"
+                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
                 "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
             return
@@ -594,13 +608,15 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["reacts_post_count"]
 
         if len(links) < count:
+            # 아직 덜 입력 → 진행 상황 안내
             await update.message.reply_text(
-                f"✅ {len(links)}개 링크 확인됨.\n"
-                f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
+                f"✅ {len(links)}개 게시글 입력 완료.\n"
+                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.",
                 reply_markup=back_only_kb()
             )
             return
         else:
+            # 링크 다 입력됨 → 최종 요약
             context.user_data["awaiting_link_reacts"] = False
 
             qty = context.user_data["reacts_qty"]
@@ -610,19 +626,31 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             context.user_data["reacts_amount"] = total_amount
 
-            safe_links = [safe_md(l) for l in links]
+            # 결제 매칭을 위해 pending_orders 저장
+            user_id = str(update.effective_user.id)
+            chat_id = update.effective_chat.id
+            pending_orders[user_id] = {
+                "qty": qty * count,
+                "amount": total_amount,
+                "chat_id": chat_id,
+                "type": "reacts",
+                "created_at": datetime.utcnow().timestamp()
+            }
+            _save_state()
+
+            safe_links = [safe_md(l) for l in links[:count]]
             await update.message.reply_text(
-                "🧾 최종 주문 요약\n"
-                f"- 반응: {qty:,} × {count}개 게시글\n"
+                "🧾 <b>최종 주문 요약</b>\n"
+                f"- 반응: {qty:,}개 × {count}개 게시글\n"
                 f"- 총 주문량: {qty * count:,}개\n"
                 f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: `{PAYMENT_ADDRESS}`\n"
-                f"- 결제금액: {total_amount} USDT\n\n"
-                "⚠️ 반드시 위 **정확한 금액(소수점 포함)** 으로 송금해주세요.\n"
+                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
+                f"- 결제금액: <b>{total_amount} USDT</b>\n\n"
+                "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
                 "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
             return
