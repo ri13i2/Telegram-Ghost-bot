@@ -545,14 +545,14 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # --- 조회수 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_views"):
-        link = update.message.text.strip()
+    link = update.message.text.strip()
         context.user_data["views_links"].append(link)
 
         links = context.user_data["views_links"]
         count = context.user_data["views_post_count"]
 
         if len(links) < count:
-            # 중간 알림 + 지금까지 입력한 링크 표시
+            # 아직 부족 → 중간 안내
             safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
@@ -561,8 +561,9 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=back_only_kb()
             )
             return
-        else:
-            # 링크 다 입력됨 → 최종 요약
+
+        elif len(links) == count:
+            # 딱 맞게 입력 완료 → 최종 주문 요약
             context.user_data["awaiting_link_views"] = False
 
             qty = context.user_data["views_qty"]
@@ -572,10 +573,9 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             context.user_data["views_amount"] = total_amount
 
-            # 결제 매칭을 위해 pending_orders 저장
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
-            pending_orders[user_id] = {
+                pending_orders[user_id] = {
                 "qty": qty * count,
                 "amount": total_amount,
                 "chat_id": chat_id,
@@ -601,6 +601,10 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
 
+        else:
+            await update.message.reply_text("❌ 이미 모든 링크를 입력하셨습니다.")
+            return
+
     # --- 반응 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_reacts"):
         link = update.message.text.strip()
@@ -610,6 +614,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["reacts_post_count"]
 
         if len(links) < count:
+            # 아직 부족 → 중간 안내
             safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
@@ -618,8 +623,9 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=back_only_kb()
             )
             return
-        else:
-            # 링크 다 입력됨 → 최종 요약
+
+        elif len(links) == count:
+            # 딱 맞게 입력 완료 → 최종 주문 요약
             context.user_data["awaiting_link_reacts"] = False
 
             qty = context.user_data["reacts_qty"]
@@ -629,7 +635,6 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             context.user_data["reacts_amount"] = total_amount
 
-            # 결제 매칭을 위해 pending_orders 저장
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
             pending_orders[user_id] = {
@@ -656,6 +661,10 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
+            return
+
+        else:
+            await update.message.reply_text("❌ 이미 모든 링크를 입력하셨습니다.")
             return
 
 # ─────────────────────────────────────────────
