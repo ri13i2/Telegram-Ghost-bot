@@ -391,37 +391,20 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.user_data.get("awaiting_qty_views"):
         text = update.message.text.strip().replace(",", "")
         if not text.isdigit():
-            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요.", reply_markup=back_only_kb())
             return
-
         qty = int(text)
         if qty < 100 or qty % 100 != 0:
-            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
-        # 금액 계산
-        blocks = qty // 100
-        base_amount = (PER_100_PRICE_VIEWS * Decimal(blocks) * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        # 0.001 ~ 0.009 USDT 랜덤 오프셋
-        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
-
-        # 최종 금액
-        total_amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
-
-        # 상태 업데이트
-        context.user_data["awaiting_qty_views"] = False
-        context.user_data["awaiting_post_count_views"] = True   # ✅ 게시글 개수 입력 단계
+        # 👉 수량만 저장
         context.user_data["views_qty"] = qty
-        context.user_data["views_amount"] = total_amount
-
-        user_id = str(update.effective_user.id)
-        chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": total_amount, "chat_id": chat_id, "type": "views", "created_at": datetime.utcnow().timestamp()}
-        _save_state()
+        context.user_data["awaiting_qty_views"] = False
+        context.user_data["awaiting_post_count_views"] = True
 
         await update.message.reply_text(
-            f"✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
+            "✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
             "몇 개의 게시글에 분배할지 게시글 개수를 입력해주세요.\n"
             "예: 1, 3, 5",
             reply_markup=back_only_kb()
@@ -432,40 +415,20 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.user_data.get("awaiting_qty_reacts"):
         text = update.message.text.strip().replace(",", "")
         if not text.isdigit():
-            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요. 예) 600, 1000", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 수량은 숫자만 입력해주세요.", reply_markup=back_only_kb())
             return
-
         qty = int(text)
         if qty < 100 or qty % 100 != 0:
-            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
-        # 금액 계산
-        qty = context.user_data["reacts_qty"]
-        blocks = qty // 100
-        base_amount = (PER_100_PRICE_REACTS * Decimal(blocks) * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        # 0.001 ~ 0.009 USDT 랜덤 오프셋
-        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
-
-        # 최종 금액
-        total_amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
-
-        context.user_data["reacts_amount"] = total_amount
-
-        # 상태 업데이트
+        # 👉 수량만 저장
+        context.user_data["reacts_qty"] = qty
         context.user_data["awaiting_qty_reacts"] = False
         context.user_data["awaiting_post_count_reacts"] = True
-        context.user_data["reacts_qty"] = qty
-        context.user_data["reacts_amount"] = total_amount
-
-        user_id = str(update.effective_user.id)
-        chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": total_amount, "chat_id": chat_id, "type": "reacts", "created_at": datetime.utcnow().timestamp()}
-        _save_state()
 
         await update.message.reply_text(
-            f"✅ 반응 {qty:,}개 주문 확인되었습니다.\n"
+            "✅ 조회수 {qty:,}개 주문 확인되었습니다.\n"
             "몇 개의 게시글에 분배할지 게시글 개수를 입력해주세요.\n"
             "예: 1, 3, 5",
             reply_markup=back_only_kb()
@@ -476,29 +439,38 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.user_data.get("awaiting_post_count_views"):
         text = update.message.text.strip()
         if not text.isdigit():
-            await update.message.reply_text("❌ 숫자만 입력해주세요. 예) 1, 3, 5", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 게시글 개수는 숫자만 입력해주세요.", reply_markup=back_only_kb())
             return
-
         count = int(text)
-        if count < 1 or count > 20:
-            await update.message.reply_text("❌ 게시글 개수는 1~20개 사이만 가능합니다.", reply_markup=back_only_kb())
+        if count < 1:
+            await update.message.reply_text("❌ 게시글 개수는 최소 1개 이상이어야 합니다.", reply_markup=back_only_kb())
             return
 
-        context.user_data["awaiting_post_count_views"] = False
-        context.user_data["awaiting_link_views"] = True
         context.user_data["views_post_count"] = count
-        context.user_data["views_links"] = []
-
-        # ✅ 여기서 총 결제금액 다시 계산
         qty = context.user_data["views_qty"]
         blocks = qty // 100
+
+        # 👉 최종 금액 계산
         base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
         total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        context.user_data["views_amount"] = amount
+
+        context.user_data["views_amount"] = total_amount
+        context.user_data["awaiting_post_count_views"] = False
+
+        # 👉 주문 데이터 저장
+        user_id = str(update.effective_user.id)
+        chat_id = update.effective_chat.id
+        pending_orders[user_id] = {
+            "qty": qty, "amount": total_amount,
+            "chat_id": chat_id, "type": "views",
+            "created_at": datetime.utcnow().timestamp()
+        }
+        _save_state()
 
         await update.message.reply_text(
-            f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
-            "각 링크는 한 줄씩 보내주시면 됩니다.",
+            f"✅ 조회수 {qty:,}회 주문이 확인되었습니다.\n"
+            f"게시글 {count}개에 분배됩니다.\n"
+            "🧾 최종 주문 요약이 곧 표시됩니다.",
             reply_markup=back_only_kb()
         )
         return
@@ -507,29 +479,38 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if context.user_data.get("awaiting_post_count_reacts"):
         text = update.message.text.strip()
         if not text.isdigit():
-            await update.message.reply_text("❌ 숫자만 입력해주세요. 예) 1, 3, 5", reply_markup=back_only_kb())
+            await update.message.reply_text("❌ 게시글 개수는 숫자만 입력해주세요.", reply_markup=back_only_kb())
             return
-
         count = int(text)
-        if count < 1 or count > 20:
-            await update.message.reply_text("❌ 게시글 개수는 1~20개 사이만 가능합니다.", reply_markup=back_only_kb())
+        if count < 1:
+            await update.message.reply_text("❌ 게시글 개수는 최소 1개 이상이어야 합니다.", reply_markup=back_only_kb())
             return
 
-        context.user_data["awaiting_post_count_reacts"] = False
-        context.user_data["awaiting_link_reacts"] = True
         context.user_data["reacts_post_count"] = count
-        context.user_data["reacts_links"] = []
-
-        # ✅ 총 결제금액 계산
         qty = context.user_data["reacts_qty"]
         blocks = qty // 100
+
+        # 👉 최종 금액 계산
         base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
         total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        context.user_data["reacts_amount"] = amount
+
+        context.user_data["reacts_amount"] = total_amount
+        context.user_data["awaiting_post_count_reacts"] = False
+
+        # 👉 주문 데이터 저장
+        user_id = str(update.effective_user.id)
+        chat_id = update.effective_chat.id
+        pending_orders[user_id] = {
+           "qty": qty, "amount": total_amount,
+            "chat_id": chat_id, "type": "reacts",
+            "created_at": datetime.utcnow().timestamp()
+        }
+        _save_state()
 
         await update.message.reply_text(
-            f"이제 게시글 링크 {count}개를 순서대로 입력해주세요.\n"
-            "각 링크는 한 줄씩 보내주시면 됩니다.",
+            f"✅ 반응 {qty:,}회 주문이 확인되었습니다.\n"
+            f"게시글 {count}개에 분배됩니다.\n"
+            "🧾 최종 주문 요약이 곧 표시됩니다.",
             reply_markup=back_only_kb()
         )
         return
