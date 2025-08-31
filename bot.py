@@ -434,7 +434,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     # --- 조회수 게시글 개수 입력 ---
-        if context.user_data.get("awaiting_post_count_views"):
+    if context.user_data.get("awaiting_post_count_views"):
         try:
             post_count = int(update.message.text.strip())
         except ValueError:
@@ -453,7 +453,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     # --- 반응 게시글 개수 입력 ---
-        if context.user_data.get("awaiting_post_count_reacts"):
+    if context.user_data.get("awaiting_post_count_reacts"):
         try:
             post_count = int(update.message.text.strip())
         except ValueError:
