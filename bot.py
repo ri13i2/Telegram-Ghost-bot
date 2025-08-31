@@ -552,10 +552,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["views_post_count"]
 
         if len(links) < count:
-            # 아직 덜 입력 → 진행 상황 안내
+            # 중간 알림 + 지금까지 입력한 링크 표시
+            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
-                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.",
+                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.\n\n"
+                "📌 현재까지 입력된 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]),
                 reply_markup=back_only_kb()
             )
             return
@@ -608,10 +610,11 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["reacts_post_count"]
 
         if len(links) < count:
-            # 아직 덜 입력 → 진행 상황 안내
+            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
-                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.",
+                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.\n\n"
+                "📌 현재까지 입력된 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]),
                 reply_markup=back_only_kb()
             )
             return
