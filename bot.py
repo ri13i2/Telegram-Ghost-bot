@@ -434,56 +434,42 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     # --- 조회수 게시글 개수 입력 ---
-    if context.user_data.get("awaiting_post_count_views"):
-        text = update.message.text.strip()
-        if not text.isdigit():
-            await update.message.reply_text("❌ 게시글 개수는 숫자만 입력해주세요.", reply_markup=back_only_kb())
-            return
-        count = int(text)
-        if count < 1:
-            await update.message.reply_text("❌ 게시글 개수는 최소 1개 이상이어야 합니다.", reply_markup=back_only_kb())
+        if context.user_data.get("awaiting_post_count_views"):
+        try:
+            post_count = int(update.message.text.strip())
+        except ValueError:
+            await update.message.reply_text("❌ 숫자만 입력해주세요.")
             return
 
-        context.user_data["views_post_count"] = count
-        context.user_data["views_links"] = []
+        context.user_data["views_post_count"] = post_count
+        context.user_data["views_links"] = []              # ✅ 리스트 초기화
         context.user_data["awaiting_post_count_views"] = False
-        context.user_data["awaiting_link_views"] = True
-
-        qty = context.user_data["views_qty"]
+        context.user_data["awaiting_link_views"] = True    # ✅ 다음 단계 플래그 세팅
 
         await update.message.reply_text(
-            f"✅ 게시글 {count}개 선택하셨습니다.\n"
-            f"👉 각 게시글당 {qty:,}씩 투입됩니다.\n"
-            f"진행할 게시글 링크 {count}개를 순서대로 입력해주세요.",
+            f"📌 진행할 게시글 링크 {post_count}개를 순서대로 입력해주세요.",
             reply_markup=back_only_kb()
         )
         return
 
     # --- 반응 게시글 개수 입력 ---
-    if context.user_data.get("awaiting_post_count_reacts"):
-        text = update.message.text.strip()
-        if not text.isdigit():
-            await update.message.reply_text("❌ 게시글 개수는 숫자만 입력해주세요.", reply_markup=back_only_kb())
-            return
-        count = int(text)
-        if count < 1:
-            await update.message.reply_text("❌ 게시글 개수는 최소 1개 이상이어야 합니다.", reply_markup=back_only_kb())
+        if context.user_data.get("awaiting_post_count_reacts"):
+        try:
+            post_count = int(update.message.text.strip())
+        except ValueError:
+            await update.message.reply_text("❌ 숫자만 입력해주세요.")
             return
 
-        context.user_data["reacts_post_count"] = count
-        context.user_data["reacts_links"] = []
+        context.user_data["reacts_post_count"] = post_count
+        context.user_data["reacts_links"] = []              # ✅ 리스트 초기화
         context.user_data["awaiting_post_count_reacts"] = False
-        context.user_data["awaiting_link_reacts"] = True
-
-        qty = context.user_data["reacts_qty"]
+        context.user_data["awaiting_link_reacts"] = True    # ✅ 다음 단계 플래그 세팅
 
         await update.message.reply_text(
-            f"✅ 게시글 {count}개 선택하셨습니다.\n"
-            f"👉 각 게시글당 {qty:,}개씩 투입됩니다.\n"
-            f"진행할 게시글 링크 {count}개를 순서대로 입력해주세요.",
+            f"📌 진행할 게시글 링크 {post_count}개를 순서대로 입력해주세요.",
             reply_markup=back_only_kb()
         )
-    return
+        return
 
     # --- 유령인원 주소 입력 ---
     if context.user_data.get("awaiting_target"):
@@ -552,7 +538,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["views_post_count"]
 
         if len(links) < count:
-            # 아직 부족 → 중간 안내
+            # 중간 안내
             safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
@@ -563,14 +549,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         elif len(links) == count:
-            # 딱 맞게 입력 완료 → 최종 주문 요약
+            # 최종 주문 요약
             context.user_data["awaiting_link_views"] = False
-
             qty = context.user_data["views_qty"]
             blocks = qty // 100
             base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
             total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
             context.user_data["views_amount"] = total_amount
 
             user_id = str(update.effective_user.id)
@@ -601,10 +585,6 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             )
             return
 
-        else:
-            await update.message.reply_text("❌ 이미 모든 링크를 입력하셨습니다.")
-            return
-
     # --- 반응 게시글 링크 입력 ---
     if context.user_data.get("awaiting_link_reacts"):
         link = update.message.text.strip()
@@ -614,7 +594,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["reacts_post_count"]
 
         if len(links) < count:
-            # 아직 부족 → 중간 안내
+            # 중간 안내
             safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
                 f"✅ {len(links)}개 게시글 입력 완료.\n"
@@ -625,14 +605,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return
 
         elif len(links) == count:
-            # 딱 맞게 입력 완료 → 최종 주문 요약
+            # 최종 주문 요약
             context.user_data["awaiting_link_reacts"] = False
-
             qty = context.user_data["reacts_qty"]
             blocks = qty // 100
             base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
             total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
             context.user_data["reacts_amount"] = total_amount
 
             user_id = str(update.effective_user.id)
@@ -661,10 +639,6 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
-            return
-
-        else:
-            await update.message.reply_text("❌ 이미 모든 링크를 입력하셨습니다.")
             return
 
 # ─────────────────────────────────────────────
