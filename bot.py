@@ -61,16 +61,16 @@ def _dec(v, q="0.01", default="0.00"):
         return Decimal(default).quantize(Decimal(q))
 
 try:
-    PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "3.61"))
-    PER_100_PRICE_TELF = _dec(os.getenv("PER_100_PRICE_TELF", "5.05"))
-    PER_100_PRICE_VIEWS = _dec(os.getenv("PER_100_PRICE_VIEWS", "1.44"))
-    PER_100_PRICE_REACTS = _dec(os.getenv("PER_100_PRICE_REACTS", "1.44"))
+    PER_100_PRICE = _dec(os.getenv("PER_100_PRICE", "1.80"))
+    PER_100_PRICE_TELF = _dec(os.getenv("PER_100_PRICE_TELF", "2.15"))
+    PER_100_PRICE_VIEWS = _dec(os.getenv("PER_100_PRICE_VIEWS", "0.72"))
+    PER_100_PRICE_REACTS = _dec(os.getenv("PER_100_PRICE_REACTS", "0.72"))
 
 except InvalidOperation:
-    PER_100_PRICE = _dec("3.61")
-    PER_100_PRICE_TELF = _dec("5.05")
-    PER_100_PRICE_VIEWS = _dec("1.44")
-    PER_100_PRICE_REACTS = Decimal("1.44")
+    PER_100_PRICE = _dec("1.80")
+    PER_100_PRICE_TELF = _dec("2.15")
+    PER_100_PRICE_VIEWS = _dec("0.72")
+    PER_100_PRICE_REACTS = Decimal("0.72")
 
 # 허용오차(매칭) 기본값 0.10 USDT
 AMOUNT_TOLERANCE = _dec(os.getenv("AMOUNT_TOLERANCE", "0.10"))
