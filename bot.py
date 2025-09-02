@@ -365,21 +365,17 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000, 3000", reply_markup=back_only_kb())
             return
 
-        # 금액 계산 (텔프 단가)
+        # ✅ 금액 계산
         blocks = qty // 100
         base_amount = (PER_100_PRICE_TELF * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-        # 0.001 ~ 0.009 USDT 랜덤 오프셋
         unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
-
-        # 최종 금액
         amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
-        # 상태 업데이트
+        # ✅ 여기서 미리 저장
         context.user_data["awaiting_qty_telf"] = False
         context.user_data["awaiting_target_telf"] = True
-        context.user_data["telf_qty"] = qty
-        context.user_data["telf_amount"] = amount
+        context.user_data["ghost_qty_telf"] = qty
+        context.user_data["ghost_amount_telf"] = amount
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
@@ -410,7 +406,15 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
+        # ✅ 금액 계산
+        blocks = qty // 100
+        base_amount = (PER_100_PRICE_VIEWS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+        amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+        # ✅ 저장
         context.user_data["views_qty"] = qty
+        context.user_data["views_amount"] = amount
         context.user_data["awaiting_qty_views"] = False
         context.user_data["awaiting_post_count_views"] = True
 
@@ -433,7 +437,15 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("❌ 100단위로만 입력 가능합니다. 예) 600, 1000", reply_markup=back_only_kb())
             return
 
+        # ✅ 금액 계산
+        blocks = qty // 100
+        base_amount = (PER_100_PRICE_REACTS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+        amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+        # ✅ 저장
         context.user_data["reacts_qty"] = qty
+        context.user_data["reacts_amount"] = amount
         context.user_data["awaiting_qty_reacts"] = False
         context.user_data["awaiting_post_count_reacts"] = True
 
