@@ -336,7 +336,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "created_at": datetime.utcnow().timestamp()}
+        pending_orders[user_id] = {
+            "qty": qty,    
+            "amount": amount,
+            "chat_id": chat_id,
+            "type": "ghost",        
+            "created_at": datetime.utcnow().timestamp()
+        }
         _save_state()
         log.info("[STATE] 주문 저장됨 uid=%s qty=%s amount=%s", user_id, qty, amount)
 
@@ -377,7 +383,13 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         user_id = str(update.effective_user.id)
         chat_id = update.effective_chat.id
-        pending_orders[user_id] = {"qty": qty, "amount": amount, "chat_id": chat_id, "type": "telf", "created_at": datetime.utcnow().timestamp()}
+        pending_orders[user_id] = {
+            "qty": qty,
+            "amount": amount, 
+            "chat_id": chat_id,
+            "type": "telf",
+            "created_at": datetime.utcnow().timestamp()
+        }
         _save_state()
 
         await update.message.reply_text(
@@ -480,6 +492,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target"] = target
+            pending_orders[user_id]["type"] = "ghost" 
             _save_state()
 
         qty = context.user_data["ghost_qty"]
@@ -509,6 +522,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target_telf"] = target
+            pending_orders[user_id]["type"] = "telf"
             _save_state()
 
         qty = context.user_data["telf_qty"]
@@ -564,6 +578,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "amount": total_amount,
                 "chat_id": chat_id,
                 "type": "views",
+                "views_links": links[:count],
                 "created_at": datetime.utcnow().timestamp()
             }
             _save_state()
@@ -620,6 +635,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 "amount": total_amount,
                 "chat_id": chat_id,
                 "type": "reacts",
+                "reacts_links": links[:count],
                 "created_at": datetime.utcnow().timestamp()
             }
             _save_state()
@@ -807,12 +823,32 @@ async def check_tron_payments(app):
 
                                 # 운영자 알림
                                 if ADMIN_CHAT_ID:
+                                    order_type = order.get("type", "ghost")
+                                    type_label = {
+                                        "ghost": "유령인원",
+                                        "telf": "텔프유령인원",
+                                        "views": "조회수",
+                                        "reacts": "게시글 반응"
+                                    }.get(order_type, "알 수 없음")
+
                                     user = await app.bot.get_chat(chat_id)
                                     username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
+
+                                    # 👉 종류별 주소/링크 처리
+                                    if order_type in ["ghost", "telf"]:
+                                        addr = order.get("target", "❌ 주소 미입력")
+                                    elif order_type == "views":
+                                        addr = "\n".join(order.get("views_links", [])) or "❌ 링크 미입력"
+                                    elif order_type == "reacts":
+                                        addr = "\n".join(order.get("reacts_links", [])) or "❌ 링크 미입력"
+                                    else:
+                                        addr = "❌ 주소/링크 미입력"
+                                    
                                     await app.bot.send_message(
                                         chat_id=ADMIN_CHAT_ID,
                                         text=(f"🟢 [결제 확인]\n"
                                               f"- 주문자: {username}\n"
+                                              f"- 종류: {type_label}\n"
                                               f"- 수량: {qty:,}\n"
                                               f"- 주소: {addr}\n"
                                               f"- 금액: {amount_expected} USDT\n"
