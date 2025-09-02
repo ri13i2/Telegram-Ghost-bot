@@ -492,27 +492,26 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target"] = target
-            pending_orders[user_id]["type"] = "ghost" 
             _save_state()
 
         qty = context.user_data["ghost_qty"]
         amount = context.user_data["ghost_amount"]
 
         await update.message.reply_text(
-            "🧾 <b>최종 주문 요약</b>\n"
-            f"- 유령인원: <b>{qty:,}명</b>\n"
-            f"- 대상주소: <code>{target}</code>\n"
-            f"- 결제수단: <b>USDT(TRC20)</b>\n"
-            f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-            f"- 결제금액: <b>{amount} USDT</b>\n\n"
+            "🧾 최종 주문 요약\n"
+            f"- 유령인원: {qty:,}명\n"
+            f"- 대상주소: {target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: {PAYMENT_ADDRESS}\n"
+            f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="HTML",
             reply_markup=back_only_kb()
         )
         return
-
+        
     # --- 텔프유령인원 주소 입력 ---
     if context.user_data.get("awaiting_target_telf"):
         target = update.message.text.strip()
@@ -522,28 +521,27 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         user_id = str(update.effective_user.id)
         if user_id in pending_orders:
             pending_orders[user_id]["target_telf"] = target
-            pending_orders[user_id]["type"] = "telf"
             _save_state()
 
-        qty = context.user_data["telf_qty"]
-        amount = context.user_data["telf_amount"]
+        qty = context.user_data["ghost_qty_telf"]
+        amount = context.user_data["ghost_amount_telf"]
 
         await update.message.reply_text(
-            "🧾 <b>최종 주문 요약</b>\n"
-            f"- 텔프유령인원: <b>{qty:,}명</b>\n"
-            f"- 대상주소: <code>{target}</code>\n"
-            f"- 결제수단: <b>USDT(TRC20)</b>\n"
-            f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-            f"- 결제금액: <b>{amount} USDT</b>\n\n"
+            "🧾 최종 주문 요약\n"
+            f"- 텔프유령인원: {qty:,}명\n"
+            f"- 대상주소: {target}\n"
+            f"- 결제수단: USDT(TRC20)\n"
+            f"- 결제주소: {PAYMENT_ADDRESS}\n"
+            f"- 결제금액: {amount} USDT\n\n"
             "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-            "15분이내로 결제가 이루어지지 않을시 <b>자동취소</b>됩니다.\n"
+            "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
             "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
             parse_mode="HTML",
             reply_markup=back_only_kb()
         )
         return
-
-    # --- 조회수 게시글 링크 입력 ---
+        
+    # --- 조회수 링크 입력 (여러 개) ---
     if context.user_data.get("awaiting_link_views"):
         link = update.message.text.strip()
         context.user_data["views_links"].append(link)
@@ -552,55 +550,51 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["views_post_count"]
 
         if len(links) < count:
-            # 중간 안내
-            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
-                f"✅ {len(links)}개 게시글 입력 완료.\n"
-                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.\n\n"
-                "📌 현재까지 입력된 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]),
+                f"✅ {len(links)}개 링크 확인되었습니다.\n"
+                f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
             return
-
-        elif len(links) == count:
-            # 최종 주문 요약
+        else:
+            context.user_data["awaiting_link_views_done"] = True
             context.user_data["awaiting_link_views"] = False
-            qty = context.user_data["views_qty"]
-            blocks = qty // 100
-            base_amount = PER_100_PRICE_VIEWS * Decimal(blocks)
-            total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            context.user_data["views_amount"] = total_amount
 
+            qty = context.user_data["views_qty"]
+            amount = context.user_data["views_amount"]
+            count = len(links)
+            total_qty = qty * count
+
+            # 📌 주문 저장
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
             pending_orders[user_id] = {
-                "qty": qty * count,
-                "amount": total_amount,
+                "qty": total_qty,
+                "amount": amount,
                 "chat_id": chat_id,
                 "type": "views",
-                "views_links": links[:count],
+                "views_links": links,
                 "created_at": datetime.utcnow().timestamp()
             }
             _save_state()
 
-            safe_links = [safe_md(l) for l in links[:count]]
             await update.message.reply_text(
-                "🧾 <b>최종 주문 요약</b>\n"
-                f"- 조회수: {qty:,}개 × {count}개 게시글\n"
-                f"- 총 주문량: {qty * count:,}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
+                "🧾 최종 주문 요약\n"
+                f"- 조회수: {qty:,}회 × {count}개 게시글\n"
+                f"- 총 주문량: {total_qty:,}회\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-                f"- 결제금액: <b>{total_amount} USDT</b>\n\n"
+                f"- 결제주소: {PAYMENT_ADDRESS}\n"
+                f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="HTML",
                 reply_markup=back_only_kb()
             )
             return
 
-    # --- 반응 게시글 링크 입력 ---
+    # --- 반응 링크 입력 (여러 개) ---
     if context.user_data.get("awaiting_link_reacts"):
         link = update.message.text.strip()
         context.user_data["reacts_links"].append(link)
@@ -609,48 +603,44 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         count = context.user_data["reacts_post_count"]
 
         if len(links) < count:
-            # 중간 안내
-            safe_links = [safe_md(l) for l in links]
             await update.message.reply_text(
-                f"✅ {len(links)}개 게시글 입력 완료.\n"
-                f"👉 나머지 {count - len(links)}개 링크를 입력해주세요.\n\n"
-                "📌 현재까지 입력된 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]),
+                f"✅ {len(links)}개 링크 확인되었습니다.\n"
+                f"나머지 {count - len(links)}개 링크를 더 입력해주세요.",
                 reply_markup=back_only_kb()
             )
             return
-
-        elif len(links) == count:
-            # 최종 주문 요약
+        else:
+            context.user_data["awaiting_link_reacts_done"] = True
             context.user_data["awaiting_link_reacts"] = False
-            qty = context.user_data["reacts_qty"]
-            blocks = qty // 100
-            base_amount = PER_100_PRICE_REACTS * Decimal(blocks)
-            total_amount = (base_amount * Decimal(count)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            context.user_data["reacts_amount"] = total_amount
 
+            qty = context.user_data["reacts_qty"]
+            amount = context.user_data["reacts_amount"]
+            count = len(links)
+            total_qty = qty * count
+
+            # 📌 주문 저장
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
             pending_orders[user_id] = {
-                "qty": qty * count,
-                "amount": total_amount,
+                "qty": total_qty,
+                "amount": amount,
                 "chat_id": chat_id,
                 "type": "reacts",
-                "reacts_links": links[:count],
+                "reacts_links": links,
                 "created_at": datetime.utcnow().timestamp()
             }
             _save_state()
 
-            safe_links = [safe_md(l) for l in links[:count]]
             await update.message.reply_text(
-                "🧾 <b>최종 주문 요약</b>\n"
+                "🧾 최종 주문 요약\n"
                 f"- 반응: {qty:,}개 × {count}개 게시글\n"
-                f"- 총 주문량: {qty * count:,}개\n"
-                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(safe_links, 1)]) + "\n\n"
+                f"- 총 주문량: {total_qty:,}개\n"
+                f"- 게시글 링크:\n" + "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) + "\n\n"
                 f"- 결제수단: USDT(TRC20)\n"
-                f"- 결제주소: <code>{PAYMENT_ADDRESS}</code>\n"
-                f"- 결제금액: <b>{total_amount} USDT</b>\n\n"
+                f"- 결제주소: {PAYMENT_ADDRESS}\n"
+                f"- 결제금액: {amount} USDT\n\n"
                 "⚠️ 반드시 위 <b>정확한 금액(소수점 포함)</b> 으로 송금해주세요.\n"
-                "15분이내로 결제가 이루어지지 않으면 자동취소됩니다.\n"
+                "15분이내로 결제가 이루어지지 않을시 자동취소됩니다.\n"
                 "결제가 확인되면 자동으로 메시지가 전송됩니다 ✅",
                 parse_mode="HTML",
                 reply_markup=back_only_kb()
@@ -810,18 +800,28 @@ async def check_tron_payments(app):
                                 # 고객 알림
                                 chat_id = order["chat_id"]
                                 qty = order["qty"]
-                                addr = order.get("target", "❌ 주소 미입력")
+                                order_type = order.get("type", "ghost")
+
+                                if order_type == "views":
+                                    post_count = len(order.get("views_links", []))
+                                    qty_text = f"{qty:,} × {post_count}개 게시글 = {qty*post_count:,}회"
+                                elif order_type == "reacts":
+                                    post_count = len(order.get("reacts_links", []))
+                                    qty_text = f"{qty:,} × {post_count}개 게시글 = {qty*post_count:,}개"
+                                else:
+                                    qty_text = f"{qty:,}"
+
                                 amount_expected = order["amount"]
 
                                 await app.bot.send_message(
                                     chat_id=chat_id,
                                     text=(f"✅ 결제가 확인되었습니다!\n"
-                                          f"- 금액: {order['amount']:.2f} USDT\n"
-                                          f"- 주문 수량: {qty:,}\n\n"
+                                          f"- 금액: {amount_expected:.2f} USDT\n"
+                                          f"- 주문 수량: {qty_text}\n\n"
                                           "15분 내로 인원이 들어갑니다.")
                                 )
 
-                                # 운영자 알림
+                                # ── 매칭 성공 시 운영자 알림 ──
                                 if ADMIN_CHAT_ID:
                                     order_type = order.get("type", "ghost")
                                     type_label = {
@@ -834,25 +834,34 @@ async def check_tron_payments(app):
                                     user = await app.bot.get_chat(chat_id)
                                     username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
 
-                                    # 👉 종류별 주소/링크 처리
+                                    # 👉 종류별 주소/링크 처리 + 수량 계산
                                     if order_type in ["ghost", "telf"]:
                                         addr = order.get("target", "❌ 주소 미입력")
+                                        qty_display = f"{qty:,}명"
                                     elif order_type == "views":
-                                        addr = "\n".join(order.get("views_links", [])) or "❌ 링크 미입력"
+                                        links = order.get("views_links", [])
+                                        count = len(links)
+                                        addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
+                                        qty_display = f"{order['qty']:,} × {count}개 게시글 = {order['qty']*count:,}회"
                                     elif order_type == "reacts":
-                                        addr = "\n".join(order.get("reacts_links", [])) or "❌ 링크 미입력"
+                                        links = order.get("reacts_links", [])
+                                        count = len(links)
+                                        addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
+                                        qty_display = f"{order['qty']:,} × {count}개 게시글 = {order['qty']*count:,}개"
                                     else:
                                         addr = "❌ 주소/링크 미입력"
-                                    
+                                        qty_display = f"{qty:,}"
+
                                     await app.bot.send_message(
                                         chat_id=ADMIN_CHAT_ID,
                                         text=(f"🟢 [결제 확인]\n"
                                               f"- 주문자: {username}\n"
                                               f"- 종류: {type_label}\n"
-                                              f"- 수량: {qty:,}\n"
-                                              f"- 주소: {addr}\n"
+                                              f"- 수량: {qty_display}\n"
+                                              f"- 주소/링크:\n{addr}\n"
                                               f"- 금액: {amount_expected} USDT\n"
-                                              f"- TXID: {txid}")
+                                              f"- TXID: <code>{txid}</code>"),
+                                        parse_mode="HTML"
                                     )
 
                                 processed_txs.add(txid)
@@ -910,14 +919,21 @@ async def check_tron_payments(app):
                                  "다시 주문을 진행해주세요."
                         )
                         # 운영자 알림
-                        if ADMIN_CHAT_ID:
-                            await app.bot.send_message(
-                                ADMIN_CHAT_ID,
-                                f"❌ [주문 취소됨 - 시간초과]\n"
-                                f"- UID: {uid}\n"
-                                f"- 수량: {order['qty']:,}\n"
-                                f"- 금액: {order['amount']} USDT"
-                            )
+                        try:
+                            user = await app.bot.get_chat(chat_id)
+                            username = f"@{user.username}" if user.username else f"ID:{uid}"
+                        except Exception:
+                            username = f"ID:{uid}"
+
+                        await app.bot.send_message(
+                            ADMIN_CHAT_ID,
+                            f"❌ [주문 취소됨 - 시간초과]\n"
+                            f"- 주문자: {username}\n"
+                            f"- UID: {uid}\n"
+                            f"- 수량: {order['qty']:,}\n"
+                            f"- 금액: {order['amount']} USDT"
+                        )
+
                     except Exception as e:
                         log.error("[EXPIRE_NOTIFY_ERROR] uid=%s err=%s", uid, e)
 
