@@ -573,11 +573,16 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_views"] = False
 
             qty = context.user_data["views_qty"]
-            amount = context.user_data["views_amount"]
-            count = len(links)
             total_qty = qty * count
 
-            # 📌 주문 저장
+            # 📌 결제 금액 계산
+            blocks = total_qty // 100
+            base_amount = (PER_100_PRICE_VIEWS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+            amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+            # 상태 저장
+            context.user_data["views_amount"] = amount
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
             pending_orders[user_id] = {
@@ -626,11 +631,16 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             context.user_data["awaiting_link_reacts"] = False
 
             qty = context.user_data["reacts_qty"]
-            amount = context.user_data["reacts_amount"]
-            count = len(links)
             total_qty = qty * count
 
-            # 📌 주문 저장
+            # 📌 결제 금액 계산
+            blocks = total_qty // 100
+            base_amount = (PER_100_PRICE_REACTS * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            unique_offset = Decimal(str(random.randint(1, 9))) / Decimal("1000")
+            amount = (base_amount + unique_offset).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+            # 상태 저장
+            context.user_data["reacts_amount"] = amount
             user_id = str(update.effective_user.id)
             chat_id = update.effective_chat.id
             pending_orders[user_id] = {
