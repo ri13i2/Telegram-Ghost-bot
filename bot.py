@@ -808,82 +808,88 @@ async def check_tron_payments(app):
                         if amount is None:
                             continue
 
-                        # ── 매칭 체크 ──
+                        # ── 매칭 체크 내부 ──
                         for uid, order in list(pending_orders.items()):
                             expected = order["amount"].quantize(Decimal("0.01"))
                             actual = amount.quantize(Decimal("0.01"))
-                            log.debug("[MATCH_CHECK] uid=%s expected=%s actual=%s tol=%s", uid, expected, actual, AMOUNT_TOLERANCE)
 
                             if abs(expected - actual) <= AMOUNT_TOLERANCE:
                                 matched_uid = uid
+                                chat_id = order["chat_id"]
+                                order_type = order.get("type", "ghost")  # ✅ 추가
                                 log.info("[MATCH_SUCCESS] uid=%s txid=%s 금액=%s", uid, txid, actual)
 
-                                # 고객 알림
-                                chat_id = order["chat_id"]
-                                qty = order["qty"]
-                                order_type = order.get("type", "ghost")
-
+                                # 👉 고객 알림 수량 텍스트
                                 if order_type == "views":
                                     post_count = len(order.get("views_links", []))
-                                    qty_text = f"{qty:,} × {post_count}개 게시글 = {qty*post_count:,}회"
+                                    per_post = order['qty'] // post_count if post_count else order['qty']
+                                    qty_text = f"{per_post:,} × {post_count}개 게시글 = {order['qty']:,}회"
+
                                 elif order_type == "reacts":
                                     post_count = len(order.get("reacts_links", []))
-                                    qty_text = f"{qty:,} × {post_count}개 게시글 = {qty*post_count:,}개"
+                                    per_post = order['qty'] // post_count if post_count else order['qty']
+                                    qty_text = f"{per_post:,} × {post_count}개 게시글 = {order['qty']:,}개"
+
                                 else:
-                                    qty_text = f"{qty:,}"
+                                    qty_text = f"{order['qty']:,}명"
 
-                                amount_expected = order["amount"]
-
+                                # 고객 알림 전송
                                 await app.bot.send_message(
                                     chat_id=chat_id,
                                     text=(f"✅ 결제가 확인되었습니다!\n"
-                                          f"- 금액: {amount_expected:.2f} USDT\n"
+                                          f"- 금액: {order['amount']:.2f} USDT\n"
                                           f"- 주문 수량: {qty_text}\n\n"
                                           "15분 내로 인원이 들어갑니다.")
                                 )
 
-                                # ── 매칭 성공 시 운영자 알림 ──
-                                if ADMIN_CHAT_ID:
-                                    order_type = order.get("type", "ghost")
-                                    type_label = {
-                                        "ghost": "유령인원",
-                                        "telf": "텔프유령인원",
-                                        "views": "조회수",
-                                        "reacts": "게시글 반응"
-                                    }.get(order_type, "알 수 없음")
+                                # 👉 운영자 알림 준비
+                                type_label = {
+                                    "ghost": "유령인원",
+                                    "telf": "텔프유령인원",
+                                    "views": "조회수",
+                                    "reacts": "게시글 반응"
+                                }.get(order_type, "알 수 없음")
 
+                                try:
                                     user = await app.bot.get_chat(chat_id)
                                     username = f"@{user.username}" if user.username else f"ID:{matched_uid}"
+                                except Exception:
+                                    username = f"ID:{matched_uid}"
 
-                                    # 👉 종류별 주소/링크 처리 + 수량 계산
-                                    if order_type in ["ghost", "telf"]:
-                                        addr = order.get("target", "❌ 주소 미입력")
-                                        qty_display = f"{qty:,}명"
-                                    elif order_type == "views":
-                                        links = order.get("views_links", [])
-                                        count = len(links)
-                                        addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
-                                        qty_display = f"{order['qty']:,} × {count}개 게시글 = {order['qty']*count:,}회"
-                                    elif order_type == "reacts":
-                                        links = order.get("reacts_links", [])
-                                        count = len(links)
-                                        addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
-                                        qty_display = f"{order['qty']:,} × {count}개 게시글 = {order['qty']*count:,}개"
-                                    else:
-                                        addr = "❌ 주소/링크 미입력"
-                                        qty_display = f"{qty:,}"
+                                # 종류별 주소/링크 처리
+                                if order_type in ["ghost", "telf"]:
+                                    addr = order.get("target") or order.get("target_telf") or "❌ 주소 미입력"
+                                    qty_text = f"{order['qty']:,}명"
 
-                                    await app.bot.send_message(
-                                        chat_id=ADMIN_CHAT_ID,
-                                        text=(f"🟢 [결제 확인]\n"
-                                              f"- 주문자: {username}\n"
-                                              f"- 종류: {type_label}\n"
-                                              f"- 수량: {qty_display}\n"
-                                              f"- 주소/링크:\n{addr}\n"
-                                              f"- 금액: {amount_expected} USDT\n"
-                                              f"- TXID: <code>{txid}</code>"),
-                                        parse_mode="HTML"
-                                    )
+                                elif order_type == "views":
+                                    links = order.get("views_links", [])
+                                    count = len(links)
+                                    per_post = order['qty'] // count if count else order['qty']
+                                    addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
+                                    qty_text = f"{per_post:,} × {count}개 게시글 = {order['qty']:,}회"
+
+                                elif order_type == "reacts":
+                                    links = order.get("reacts_links", [])
+                                    count = len(links)
+                                    per_post = order['qty'] // count if count else order['qty']
+                                    addr = "\n".join([f"{i+1}. {l}" for i, l in enumerate(links, 1)]) or "❌ 링크 미입력"
+                                    qty_text = f"{per_post:,} × {count}개 게시글 = {order['qty']:,}개"
+
+                                else:
+                                    addr = "❌ 주소/링크 미입력"
+
+                                # 운영자 알림 전송
+                                await app.bot.send_message(
+                                    chat_id=ADMIN_CHAT_ID,
+                                    text=(f"🟢 [결제 확인]\n"
+                                          f"- 주문자: {username}\n"
+                                          f"- 종류: {type_label}\n"
+                                          f"- 수량: {qty_text}\n"
+                                          f"- 주소/링크:\n{addr}\n"
+                                          f"- 금액: {order['amount']} USDT\n"
+                                          f"- TXID: <code>{txid}</code>"),
+                                    parse_mode="HTML"
+                                )
 
                                 processed_txs.add(txid)
                                 pending_orders.pop(matched_uid)
