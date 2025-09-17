@@ -959,7 +959,6 @@ async def on_startup(app):
     # Tron 결제 체크 태스크 실행
     app.create_task(check_tron_payments(app))
 
-
 def main():
     TOKEN = os.getenv("BOT_TOKEN")
     if not TOKEN:
