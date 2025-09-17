@@ -954,9 +954,7 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 # 메인 함수 수정
 async def on_startup(app):
-    # ✅ 웹훅 완전 삭제 (비동기)
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    # Tron 결제 체크 태스크 실행
+    await app.bot.delete_webhook(drop_pending_updates=True)  # 웹훅 끊기
     app.create_task(check_tron_payments(app))
 
 def main():
@@ -967,7 +965,7 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
-    # 핸들러 등록
+    # ✅ 반드시 start 핸들러 추가
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_input_handler))
