@@ -178,32 +178,6 @@ def _load_state():
                 continue
         pending_orders = po
         processed_txs = set(data.get("processed_txs") or [])
-        last_seen_ts = data.get("last_seen_ts", 0)
-        seen_txids = set(data.get("seen_txids") or [])
-        log.info("[STATE] loaded pending=%s processed=%s last_seen=%s",
-                 len(pending_orders), len(processed_txs), last_seen_ts)
-    except Exception as e:
-        log.error("[STATE_LOAD_ERROR] %s", e)
-
-def _load_state():
-    global pending_orders, processed_txs, last_seen_ts, seen_txids
-    if not STATE_FILE.exists():
-        return
-    try:
-        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        po = {}
-        for uid, v in (data.get("pending_orders") or {}).items():
-            try:
-                po[str(uid)] = {
-                    "qty": int(v["qty"]),
-                    "amount": _dec(v["amount"]),
-                    "chat_id": int(v["chat_id"]),
-                    "created_at": float(v.get("created_at", datetime.utcnow().timestamp())),
-                }
-            except Exception:
-                continue
-        pending_orders = po
-        processed_txs = set(data.get("processed_txs") or [])
         last_seen_ts = float(data.get("last_seen_ts", 0))
         seen_txids = set(data.get("seen_txids") or [])
         log.info("[STATE] loaded pending=%s processed=%s", len(pending_orders), len(processed_txs))
