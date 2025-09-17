@@ -16,6 +16,7 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters,
 )
 from datetime import datetime, timedelta
+from telegram.helpers import escape_markdown
 
 import aiohttp
 
@@ -157,6 +158,32 @@ def _save_state():
                   len(pending_orders), len(processed_txs), last_seen_ts)
     except Exception as e:
         log.error("[STATE_SAVE_ERROR] %s", e)
+
+def _load_state():
+    global pending_orders, processed_txs, last_seen_ts, seen_txids
+    if not STATE_FILE.exists():
+        return
+    try:
+        data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        po = {}
+        for uid, v in (data.get("pending_orders") or {}).items():
+            try:
+                po[str(uid)] = {
+                    "qty": int(v["qty"]),
+                    "amount": _dec(v["amount"]),
+                    "chat_id": int(v["chat_id"]),
+                    "created_at": float(v.get("created_at", datetime.utcnow().timestamp())),
+                }
+            except Exception:
+                continue
+        pending_orders = po
+        processed_txs = set(data.get("processed_txs") or [])
+        last_seen_ts = data.get("last_seen_ts", 0)
+        seen_txids = set(data.get("seen_txids") or [])
+        log.info("[STATE] loaded pending=%s processed=%s last_seen=%s",
+                 len(pending_orders), len(processed_txs), last_seen_ts)
+    except Exception as e:
+        log.error("[STATE_LOAD_ERROR] %s", e)
 
 def _load_state():
     global pending_orders, processed_txs, last_seen_ts, seen_txids
@@ -735,10 +762,6 @@ async def check_tron_payments(app):
                     txs = await fetch_txs(session, alt_url, HEADERS)
 
                 # 3) TronScan fallback
-
-                TRONSCAN_URL = (
-                    f"https://apilist.tronscanapi.com/api/token_trc20/transfers?limit=20&toAddress={PAYMENT_ADDRESS}&contract_address={USDT_CONTRACT}"
-                )
                 if not txs:
                     txs = await fetch_txs(session, TRONSCAN_URL)
 
@@ -835,7 +858,7 @@ async def check_tron_payments(app):
 
                                 # 종류별 주소/링크 처리
                                 if order_type in ["ghost", "telf"]:
-                                    addr = order.get("target") or order.get("target_telf") or "❌ 링크 미입력"
+                                    addr = order.get("target") or order.get("target_telf") or "❌ 주소 미입력"
                                     qty_text = f"{order['qty']:,}명"
 
                                 elif order_type == "views":
@@ -952,9 +975,7 @@ async def check_tron_payments(app):
 # ─────────────────────────────────────────────
 # 메인 실행부
 # ─────────────────────────────────────────────
-# 메인 함수 수정
 async def on_startup(app):
-    await app.bot.delete_webhook(drop_pending_updates=True)  # 웹훅 끊기
     app.create_task(check_tron_payments(app))
 
 def main():
@@ -965,10 +986,13 @@ def main():
 
     app = ApplicationBuilder().token(TOKEN).post_init(on_startup).build()
 
-    # ✅ 반드시 start 핸들러 추가
+    # 핸들러 추가 (start, 메뉴, 입력)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(menu_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_input_handler))
 
     print("✅ 유령 자판기 봇 실행 중...")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
